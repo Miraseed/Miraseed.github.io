@@ -1,11 +1,11 @@
 # 期权卖方信号监控（Pages 版）
 
 数据由 GitHub Actions 定时刷新（北京时间 9:35~15:35 每30分钟 + 16:05 收盘补充），
-页面带访问密码（AES-GCM 加密 data.bin，密码由仓库 Secret `PAGE_PASSWORD` 控制）。
+页面带访问密码（AES-GCM 加密 data.enc.txt，密码由仓库 Secret `PAGE_PASSWORD` 控制）。
 
 ## 仓库结构
 - `docs/index.html` 静态页面（含密码门）
-- `docs/data.bin` 加密后的最新评级数据（Actions 自动更新，勿手改）
+- `docs/data.enc.txt` 加密后的最新评级数据（Actions 自动更新，勿手改）
 - `docs/history.json` 历史信号累积（Actions 自动更新）
 - `build_data.py` 取数脚本（复用私有主仓库 etf-option-monitor 的 monitor 逻辑）
 - `encrypt_data.py` 数据加密脚本

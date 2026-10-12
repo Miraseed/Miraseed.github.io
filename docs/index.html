@@ -325,9 +325,9 @@ async function decryptBlob(pwd, blob){
   return JSON.parse(new TextDecoder().decode(pt));
 }
 
-/* ---------- 数据获取：优先加密 data.bin，回退明文 data.json ---------- */
+/* ---------- 数据获取：优先加密 data.enc.txt，回退明文 data.json ---------- */
 async function loadSnap(pwd){
-  const r = await fetch('data.bin?t='+Date.now(),{cache:'no-store'});
+  const r = await fetch('data.enc.txt?t='+Date.now(),{cache:'no-store'});
   if(r.ok){
     const blob = await r.json();
     return await decryptBlob(pwd, blob);
