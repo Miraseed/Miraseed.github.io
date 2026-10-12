@@ -15,10 +15,10 @@ DST = os.path.join(HERE, 'docs', 'data.enc.txt')
 DEFAULT_PWD = 'miraseed2026'
 
 
-def encrypt_bytes(key: bytes, plaintext: bytes, aad: bytes = b''):
+def encrypt_bytes(key: bytes, plaintext: bytes):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     iv = os.urandom(12)
-    ct = AESGCM(key).encrypt(iv, plaintext, aad)
+    ct = AESGCM(key).encrypt(iv, plaintext, None)
     return iv, ct
 
 
@@ -31,7 +31,7 @@ def main():
 
     salt = os.urandom(16)
     key = hashlib.pbkdf2_hmac('sha256', pwd.encode('utf-8'), salt, 100000, dklen=32)
-    iv, ct = encrypt_bytes(key, plaintext, aad=b'option-monitor')
+    iv, ct = encrypt_bytes(key, plaintext)   # 不用 AAD，保证 WebCrypto 可解
 
     blob = {
         'v': 1,
