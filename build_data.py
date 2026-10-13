@@ -362,7 +362,10 @@ def _row_from_chain(name, chains, source_label):
         pct_src = '回退 panel 全序列'
     cfg = ID.POOL.get(name, {})
     th = cfg.get('pct_th', 0.8)
-    trig = bool(np.isfinite(pct) and pct >= th)
+    # 与 monitor.check_one 一致：pct ≥ pct_th 且（如配置）ATM IV ≥ iv_th
+    iv_ok = (cfg.get('iv_th') is None
+             or (np.isfinite(iv) and iv >= cfg['iv_th']))
+    trig = bool(np.isfinite(pct) and pct >= th and iv_ok)
 
     S = float(main['S'].iloc[0]) if 'S' in main.columns and pd.notna(main['S'].iloc[0]) else np.nan
     S_pct = float(main['S_pct'].iloc[0]) if 'S_pct' in main.columns and pd.notna(main['S_pct'].iloc[0]) else np.nan
@@ -393,7 +396,13 @@ def _row_from_chain(name, chains, source_label):
     else:
         contract, delta_v, dte_v = '—', None, None
 
-    if trig:
+    if cfg.get('hint_only'):
+        # 铁矿石：新口径回测各阈值档均为负收益 → 只做信号灯观察，不给操作建议
+        sig = '⊙ 仅观察'
+        strat = ('回测（新口径）各阈值档均为负收益，仅记录 IV 分位供观察，不建议实盘操作'
+                 + (f'；当前分位 {pct*100:.0f}%（阈值 {th*100:.0f}%）。' if np.isfinite(pct) else '。'))
+        reason = '—'
+    elif trig:
         sig = '★ 卖出认沽'
         strat = (f"卖出 {name} {mlabel} 虚值认沽"
                  + (f" K≈{best_put['strike']:.4g}" if best_put else '')
