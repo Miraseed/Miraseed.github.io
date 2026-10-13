@@ -16,6 +16,7 @@
 ============================================================================
 """
 import os
+import re
 import sys
 import json
 import datetime
@@ -106,6 +107,61 @@ def _atm_iv(ch):
     return float(iv.median()) if len(iv) else np.nan
 
 
+def _short_month(label):
+    """合约月标签统一为 4 位数字（如 2610 / 2611 / 2701）。
+
+    品种名已在同一行展示，无需重复；'2026-10' -> '2610'，'MO2611' -> '2611'，
+    'i2701' -> '2701'。
+    """
+    if not label:
+        return ''
+    s = str(label)
+    m = re.search(r'(\d{4})(?!\d)', s.replace('-', ''))
+    if re.search(r'\d{4}-\d{2}', s):
+        y, mm = s.split('-')
+        return f'{y[2:]}{mm}'
+    m = re.search(r'(\d{4})$', s)
+    return m.group(1) if m else s
+
+
+def _dte_rank(dte):
+    """剩余天数优先级（用户口径）：30-45 > 45-60 > 14-30 > >60 > <14。
+
+    返回 (档位序号, 距理想中枢的偏移)；序号越小越优先。
+    """
+    if dte is None or not np.isfinite(dte):
+        return (99, 9999)
+    d = float(dte)
+    if 30 <= d <= 45:
+        return (0, abs(d - 37.5))
+    if 45 < d <= 60:
+        return (1, abs(d - 52.5))
+    if 14 <= d < 30:
+        return (2, abs(d - 22))
+    if d > 60:
+        return (3, d - 60)
+    return (4, 14 - d)          # < 14 天
+
+
+def _month_label(name, ch):
+    """从链里取合约月标签，简洁形式（2610 / MO2611 / i2612）。"""
+    if ch is None or not len(ch):
+        return ''
+    for col in ('month', 'cid'):
+        if col in ch.columns and len(ch):
+            v = str(ch[col].iloc[0])
+            if not v:
+                continue
+            if col == 'cid':
+                m = re.search(r'(\d{4})(?=[CPcp]\d)', v)
+                if m:
+                    return m.group(1)
+            m = re.search(r'(\d{4})', v)
+            if m:
+                return m.group(1)
+    return ''
+
+
 def _pick_put(ch):
     """在认沽里挑最接近目标 Delta 的合约，作为建议合约。"""
     if ch is None or not len(ch) or 'put' not in ch.columns:
@@ -122,38 +178,78 @@ def _pick_put(ch):
                 dte=(int(b['dte']) if 'dte' in puts.columns and np.isfinite(b['dte']) else None))
 
 
-def _row_from_chain(name, ch, source_label):
-    """把一条实时期权链 -> 一行看板记录（含建议合约与行情时间戳）。"""
+def _row_from_chain(name, chains, source_label):
+    """把「某标的的多月链」-> 一行看板记录。
+
+    chains: {月标签: DataFrame}，按月份升序。
+    建议合约：在所有月份里挑「DTE 优先级最高且有合适 Delta 认沽」的那个月；
+    期限结构：近月 IV - 次近月 IV。
+    """
     now = now_cn()
     now_str = now.strftime('%Y-%m-%d %H:%M:%S')
-    iv = _atm_iv(ch)
-    if not np.isfinite(iv):
+    if isinstance(chains, pd.DataFrame):        # 兼容单链调用
+        chains = {_month_label(name, chains): chains}
+    chains = {k: v for k, v in (chains or {}).items() if v is not None and len(v)}
+    if not chains:
         return dict(标的=name, 状态='数据缺失', S=None, 昨收=None, 涨跌幅=None,
                     ATM_IV=None, IV分位=None, 信号='—',
                     建议策略='实时链取数失败，请稍后重试', 建议合约='—',
-                    建议Delta=None, 剩余天数=None,
+                    建议Delta=None, 剩余天数=None, 建议合约月=None,
                     近月IV=None, 次近月IV=None, 期限结构=None,
                     结构提示='—', 数据源='实时', 触发原因='—',
                     更新时间=now_str[:16], 行情时间戳=now_str)
+
+    # 主月 = 最近月（用于看板 ATM IV，与期限结构口径自洽）
+    months = sorted(chains.keys())
+    main_key = months[0]
+    main = chains[main_key]
+
+    # 建议合约：在全部月份里，按 (DTE优先级, Delta接近度) 挑最优认沽
+    best_put, best_key, best_rank, best_dd = None, None, 99, 9e9
+    for k in months:
+        ch = chains[k]
+        puts = ch[ch['put']] if 'put' in ch.columns else ch.iloc[0:0]
+        if not len(puts):
+            continue
+        ds = pd.to_numeric(ch['dte'], errors='coerce').dropna() if 'dte' in ch.columns else pd.Series(dtype=float)
+        dte = float(ds.median()) if len(ds) else None
+        r = _dte_rank(dte)
+        p = _pick_put(ch)
+        if not p or p.get('strike') is None:
+            continue
+        dd = abs((p['delta'] if p['delta'] is not None else 0) - TARGET_DELTA)
+        if (r[0], dd) < (best_rank, best_dd):
+            best_put, best_key, best_rank, best_dd = p, k, r[0], dd
+    if best_put is None:                        # 退化：用主月
+        best_key = main_key
+        best_put = _pick_put(main)
+
+    iv = _atm_iv(main)
     import intraday as ID
-    pct = ID.iv_percentile(name, iv)
+    pct = ID.iv_percentile(name, iv) if np.isfinite(iv) else np.nan
     cfg = ID.POOL.get(name, {})
     th = cfg.get('pct_th', 0.8)
     trig = bool(np.isfinite(pct) and pct >= th)
 
-    S = float(ch['S'].iloc[0]) if 'S' in ch.columns and pd.notna(ch['S'].iloc[0]) else np.nan
-    S_pct = float(ch['S_pct'].iloc[0]) if 'S_pct' in ch.columns and pd.notna(ch['S_pct'].iloc[0]) else np.nan
-    p = _pick_put(ch)
-    if p and p.get('strike') is not None:
-        contract = f"{name} 认沽 K≈{p['strike']:.4g}"
-        delta_v, dte_v = p['delta'], p['dte']
+    S = float(main['S'].iloc[0]) if 'S' in main.columns and pd.notna(main['S'].iloc[0]) else np.nan
+    S_pct = float(main['S_pct'].iloc[0]) if 'S_pct' in main.columns and pd.notna(main['S_pct'].iloc[0]) else np.nan
+
+    # 期限结构：近月 vs 次近月
+    near_iv = _atm_iv(chains[months[0]]) if len(months) >= 1 else np.nan
+    nxt_iv = _atm_iv(chains[months[1]]) if len(months) >= 2 else np.nan
+    term = (near_iv - nxt_iv) if (np.isfinite(near_iv) and np.isfinite(nxt_iv)) else np.nan
+
+    mlabel = _short_month(best_key or main_key or '')
+    if best_put and best_put.get('strike') is not None:
+        contract = f"{mlabel} 认沽 K≈{best_put['strike']:.4g}"
+        delta_v, dte_v = best_put['delta'], best_put['dte']
     else:
         contract, delta_v, dte_v = '—', None, None
 
     if trig:
         sig = '★ 卖出认沽'
-        strat = (f"卖出 {name} 虚值认沽"
-                 + (f" K≈{p['strike']:.4g}" if p else '')
+        strat = (f"卖出 {name} {mlabel} 虚值认沽"
+                 + (f" K≈{best_put['strike']:.4g}" if best_put else '')
                  + "；权利金 +50% 止盈 / −50% 止损；剩余≤7天移仓。保证金占用建议 ≤ 账户 50%。")
         reason = f'IV分位 {pct*100:.0f}% ≥ {th*100:.0f}%'
     else:
@@ -167,13 +263,16 @@ def _row_from_chain(name, ch, source_label):
         S=round(S, 4) if np.isfinite(S) else None,
         昨收=None,
         涨跌幅=round(S_pct, 4) if np.isfinite(S_pct) else None,
-        ATM_IV=round(iv, 4),
+        ATM_IV=round(iv, 4) if np.isfinite(iv) else None,
         IV分位=round(pct, 3) if np.isfinite(pct) else None,
         信号=sig, 建议策略=strat, 建议合约=contract,
-        建议行权价=(p['strike'] if p else None),
+        建议合约月=mlabel,
+        建议行权价=(best_put['strike'] if best_put else None),
         建议Delta=(round(delta_v, 3) if delta_v is not None else None),
         剩余天数=(dte_v if dte_v is not None else None),
-        近月IV=None, 次近月IV=None, 期限结构=None,
+        近月IV=(round(near_iv, 4) if np.isfinite(near_iv) else None),
+        次近月IV=(round(nxt_iv, 4) if np.isfinite(nxt_iv) else None),
+        期限结构=(round(term, 4) if np.isfinite(term) else None),
         结构提示=source_label,
         数据源='实时', 触发原因=reason,
         更新时间=now_str[:16], 行情时间戳=now_str)
@@ -284,44 +383,66 @@ def _atm_of_chain(ch):
                 n=int(len(atm)))
 
 
-def build_atm_table():
-    """合约IV对照表：7 标的 × 近月/次近月/远月，全部走实时链，带实时时间戳。"""
+def _chains_for(name):
+    """取某标的的「多月链」：{月标签: DataFrame}，按月份升序。
+
+    - ETF：逐月拉新浪 ETF 链（2610/2611/2612/2703…）
+    - 中证1000：逐月拉中金所 MO 链
+    - 铁矿石：逐月拉大商所链
+    所有链都补齐 iv/delta/S 列。
+    """
     import sina_option as SO
-    now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
-    out = []
-    for name in ATM_ORDER:
-        # 1) 取该标的的全部月份链
-        if name == '中证1000股指':
-            months = SO.index_option_months('MO', 'cffex')
-            chains = {}
-            for code in months:
-                try:
-                    ch = SO.index_option_chain('MO', 'cffex', code)
-                except Exception:
-                    ch = None
-                if ch is not None and len(ch):
-                    # 按合约月分组
-                    key = str(ch['month'].iloc[0]) if 'month' in ch.columns else code
-                    chains[key] = ch
-        elif name == '铁矿石期权':
-            chains = _commodity_months_with_iv()
-        else:
-            import intraday as ID
-            code = ID.POOL.get(name, {}).get('code', '')
-            chains = {}
-            seen = set()
-            for k, _kk, m in SO.etf_option_months(code):
-                if m in seen:
-                    continue
-                seen.add(m)
+    import intraday as ID
+    out = {}
+    if name == '中证1000股指':
+        for code in SO.index_option_months('MO', 'cffex'):
+            try:
+                ch = SO.index_option_chain('MO', 'cffex', code)
+            except Exception:
+                ch = None
+            if ch is not None and len(ch):
+                ch = ch.copy()
+                ch['put'] = ch['cp'].eq('P')
+                out[str(code)] = ch
+    elif name == '铁矿石期权':
+        out = _commodity_months_with_iv()
+    else:
+        code = ID.POOL.get(name, {}).get('code', '')
+        seen = set()
+        for _k, key, m in SO.etf_option_months(code):
+            if m in seen:
+                continue
+            seen.add(m)
+            ch = None
+            for _try in range(3):               # 接口偶发空返回，重试
                 try:
                     ch = SO.etf_option_chain(code, m)
                 except Exception:
                     ch = None
                 if ch is not None and len(ch):
-                    chains[m] = ch
-                    ch['put'] = ch['cp'].eq('P')
-        # 2) 每个月份算一条
+                    break
+            if ch is not None and len(ch):
+                ch = ch.copy()
+                ch['put'] = ch['cp'].eq('P')
+                out[m] = ch
+    # 只保留有报价且未到期的月
+    clean = {}
+    for k, ch in out.items():
+        nz = int((pd.to_numeric(ch['price'], errors='coerce') > 0).sum()) if 'price' in ch.columns else len(ch)
+        ds = pd.to_numeric(ch['dte'], errors='coerce').dropna() if 'dte' in ch.columns else pd.Series(dtype=float)
+        dte = float(ds.median()) if len(ds) else None
+        if nz >= 2 and (dte is None or dte >= 0):
+            clean[k] = ch
+    return clean
+
+
+def build_atm_table():
+    """合约IV对照表：7 标的 × 近月/次近月/远月，全部走实时链，带实时时间戳。"""
+    now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
+    out = []
+    for name in ATM_ORDER:
+        chains = _chains_for(name)
+        # 每个月份算一条
         for mkey in sorted(chains.keys()):
             ch = chains[mkey]
             a = _atm_of_chain(ch)
@@ -346,36 +467,26 @@ def build_atm_table():
 
 
 def fetch_all():
-    """取全部标的的实时链 -> list[row_dict]（顺序 = POOL 顺序）。"""
-    import sina_option as SO
+    """取全部标的的多月实时链 -> list[row_dict]（顺序 = POOL 顺序）。"""
     import intraday as ID
     rows = []
     for name in list(ID.POOL.keys()):
-        cfg = ID.POOL.get(name, {})
-        code = cfg.get('code', '')
         try:
+            chains = _chains_for(name)
             if name == '中证1000股指':
-                ch = SO.index_option_chain('MO', 'cffex')
-                if len(ch):
-                    ch = ch.copy()
-                    ch['put'] = ch['cp'].eq('P')
-                rows.append(_row_from_chain(name, ch, '实时链（新浪·中金所 MO）'))
+                label = '实时链（新浪·中金所 MO）'
             elif name == '铁矿石期权':
-                ch = _commodity_chain_with_iv()
-                rows.append(_row_from_chain(name, ch, '实时链（新浪·大商所）'))
+                label = '实时链（新浪·大商所）'
             else:
-                ch = SO.etf_option_chain(code)
-                if len(ch):
-                    ch = ch.copy()
-                    ch['put'] = ch['cp'].eq('P')
-                rows.append(_row_from_chain(name, ch, '实时链（新浪 BS 反解）'))
+                label = '实时链（新浪 BS 反解）'
+            rows.append(_row_from_chain(name, chains, label))
         except Exception as e:
             print(f'  {name} 取数异常: {type(e).__name__}: {str(e)[:70]}')
             now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
             rows.append(dict(标的=name, 状态='异常', S=None, 昨收=None, 涨跌幅=None,
                              ATM_IV=None, IV分位=None, 信号='—',
                              建议策略=f'取数异常：{str(e)[:60]}', 建议合约='—',
-                             建议Delta=None, 剩余天数=None,
+                             建议Delta=None, 剩余天数=None, 建议合约月=None,
                              近月IV=None, 次近月IV=None, 期限结构=None,
                              结构提示='—', 数据源='实时', 触发原因='—',
                              更新时间=now_str[:16], 行情时间戳=now_str))
@@ -398,6 +509,27 @@ def main():
     # ---- 历史信号累积（带秒级时间戳）----
     hist = load_json(HIST_JSON, [])
     today = now.strftime('%Y-%m-%d')
+    # 清洗：丢弃缺时间戳或建议合约的残缺旧记录（早期版本生成的）
+    hist = [h for h in hist
+            if h.get('时间戳') and h.get('建议合约') and h.get('建议合约') != '—']
+    # 规范化：建议合约统一为「<合约月> 认沽 K≈…」（品种名已在「标的」列，不重复）。
+    # 早期记录带品种前缀且无合约月，无法还原 -> 丢弃。
+    clean_hist = []
+    for h in hist:
+        c = str(h.get('建议合约', ''))
+        mk = str(h.get('建议合约月') or '')
+        if not mk:
+            mm = re.search(r'(?<!\d)(\d{4})(?!\d)', c)
+            # 仅当形如「2611 认沽」这类本身就是月标签时才采纳
+            if mm and re.match(r'^\d{4}\s*认沽', c):
+                mk = mm.group(1)
+        if not mk:
+            continue                     # 无法确定合约月的旧记录，丢弃
+        km = re.search(r'K≈([\d.]+)', c)
+        h['建议合约月'] = mk
+        h['建议合约'] = f"{mk} 认沽 K≈{km.group(1)}" if km else f"{mk} 认沽"
+        clean_hist.append(h)
+    hist = clean_hist
     by_key = {(str(h.get('日期', ''))[:10], str(h.get('标的', ''))): h for h in hist}
     for r in rows:
         if '★' in str(r.get('信号', '')):
@@ -406,6 +538,7 @@ def main():
                 标的=r.get('标的'), S=r.get('S'),
                 ATM_IV=r.get('ATM_IV'), IV分位=r.get('IV分位'),
                 信号=r.get('信号'), 建议合约=r.get('建议合约'),
+                建议合约月=r.get('建议合约月'),
                 建议Delta=r.get('建议Delta'), 剩余天数=r.get('剩余天数'),
                 触发原因=r.get('触发原因'))
     hist = list(by_key.values())[-500:]

@@ -254,7 +254,9 @@ function card(r){
   let tsHtml='—';
   if(ts!==null&&ts!==undefined&&!isNaN(ts)){
     const c = ts>=0.05?'up':(ts<=-0.03?'down':'');
-    tsHtml = `<span class="${c}">${(ts*100).toFixed(1)>0?'+':''}${(ts*100).toFixed(1)}%</span>`;
+    const nv = r['近月IV'], xv = r['次近月IV'];
+    const tip = (nv!=null&&xv!=null) ? ` title="近月 ${(nv*100).toFixed(1)}% − 次近月 ${(xv*100).toFixed(1)}%"` : '';
+    tsHtml = `<span class="${c}"${tip}>${(ts*100).toFixed(1)>0?'+':''}${(ts*100).toFixed(1)}%</span>`;
   }
 
   const kv = `
