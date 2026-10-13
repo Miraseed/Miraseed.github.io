@@ -44,6 +44,9 @@ os.makedirs(os.path.dirname(OUT), exist_ok=True)
 TARGET_DELTA = -0.15          # 建议合约的目标 Delta（与 monitor 一致，虚值认沽）
 CST = datetime.timezone(datetime.timedelta(hours=8))   # 北京时间（Actions 跑在 UTC）
 
+# 合约IV对照（按月）历史面板：列 [date, product, month, atm_iv, atm_strike, dte, n]
+ATM_PANEL = os.path.join(CODE, 'panel', 'atm_by_month.csv')
+
 
 def now_cn():
     """返回北京时间 datetime（naive，避免前端再转换）。"""
@@ -143,6 +146,76 @@ def _dte_rank(dte):
     return (4, 14 - d)          # < 14 天
 
 
+# ---- 同口径历史序列（按 DTE 优先级选月）----------------------------------
+# 背景：临近到期（如剩 3 天）的合约 ATM IV 会被 gamma/时间价值急剧推高，
+# 与其它月份不可比。为让「IV 分位 / ATM IV / 期限结构」口径一致且不受
+# 近月临近到期干扰，历史序列与实时值都统一取「按 DTE 优先级选中的那个月」。
+_PCT_SERIES_CACHE = {}
+
+
+def _pct_hist_series(name):
+    """返回某标的历史 ATM IV 序列（每个交易日按 DTE 优先级选出的那个月）。
+
+    口径与看板实时值完全一致：都会挑「30-45 > 45-60 > 14-30 > >60 > <14」的月。
+    数据来自 panel/atm_by_month.csv（列 date/product/month/atm_iv/dte）。
+
+    读不到时返回 None，调用方回退到旧的整条 panel 序列。
+    「创业板ETF」没有分月历史（只有 159915_ivproxy.csv 单条代理序列），
+    故它始终走回退口径 —— 这与回测口径一致，属预期行为。
+    """
+    if name in _PCT_SERIES_CACHE:
+        return _PCT_SERIES_CACHE[name]
+    out = None
+    try:
+        prod = ATM_PRODUCT.get(name, name)
+        if os.path.exists(ATM_PANEL):
+            d = pd.read_csv(ATM_PANEL)
+        else:                                    # 兼容只有 .gz 的情况
+            gz = ATM_PANEL + '.gz'
+            if not os.path.exists(gz):
+                _PCT_SERIES_CACHE[name] = None
+                return None
+            d = pd.read_csv(gz)
+        d = d[d['product'] == prod]
+        if len(d) and 'dte' in d.columns and 'atm_iv' in d.columns:
+            d = d.copy()
+            d['date'] = pd.to_datetime(d['date'])
+            picks = []
+            for day, grp in d.groupby('date'):
+                best, best_rank = None, (99, 9999)
+                for iv, dte in zip(grp['atm_iv'], grp['dte']):
+                    if not np.isfinite(iv) or not np.isfinite(dte):
+                        continue
+                    r = _dte_rank(float(dte))
+                    if r < best_rank:
+                        best_rank, best = r, float(iv)
+                if best is not None:
+                    picks.append((day, best))
+            if len(picks) >= 20:
+                picks.sort(key=lambda x: x[0])
+                out = pd.Series([p[1] for p in picks],
+                                index=[p[0] for p in picks])
+    except Exception as e:
+        print(f'  [同口径历史] {name} 读取失败，回退默认口径: {e}')
+        out = None
+    _PCT_SERIES_CACHE[name] = out
+    return out
+
+
+def iv_pct_same_basis(name, iv_now, lookback=250):
+    """同口径历史分位：拿「按优先级选月」的历史序列与当前 IV 比。
+
+    返回 (分位, 来源说明)；序列不可用时返回 (None, '面板缺失')。
+    """
+    if iv_now is None or not np.isfinite(iv_now):
+        return None, '当前IV缺失'
+    h = _pct_hist_series(name)
+    if h is None or len(h) < 20:
+        return None, '同口径历史不足'
+    h = h.tail(lookback)
+    return float((h < iv_now).mean()), f'同口径 {len(h)} 日'
+
+
 def _month_label(name, ch):
     """从链里取合约月标签，简洁形式（2610 / MO2611 / i2612）。"""
     if ch is None or not len(ch):
@@ -224,9 +297,22 @@ def _row_from_chain(name, chains, source_label):
         best_key = main_key
         best_put = _pick_put(main)
 
+    # 主月 = 建议合约所在月（而非机械的最近月）。
+    # 理由：临近到期（如剩 3 天）的合约 IV 会被急剧推高，与其它月不可比；
+    # 用「建议合约月」作为看板 ATM IV / 期限结构 / 分位的口径，
+    # 既与建议合约一致，又避免近月临近到期的失真。
+    if best_key in chains:
+        main_key = best_key
+    main = chains[main_key]
+
     iv = _atm_iv(main)
     import intraday as ID
-    pct = ID.iv_percentile(name, iv) if np.isfinite(iv) else np.nan
+    # 分位优先用「同口径历史」（历史也按 DTE 优先级选月），保证与实时值可比；
+    # 缺面板时回退到原来的整条 panel 序列。
+    pct, pct_src = iv_pct_same_basis(name, iv)
+    if pct is None:
+        pct = ID.iv_percentile(name, iv) if np.isfinite(iv) else np.nan
+        pct_src = '回退 panel 全序列'
     cfg = ID.POOL.get(name, {})
     th = cfg.get('pct_th', 0.8)
     trig = bool(np.isfinite(pct) and pct >= th)
@@ -234,9 +320,14 @@ def _row_from_chain(name, chains, source_label):
     S = float(main['S'].iloc[0]) if 'S' in main.columns and pd.notna(main['S'].iloc[0]) else np.nan
     S_pct = float(main['S_pct'].iloc[0]) if 'S_pct' in main.columns and pd.notna(main['S_pct'].iloc[0]) else np.nan
 
-    # 期限结构：近月 vs 次近月
-    near_iv = _atm_iv(chains[months[0]]) if len(months) >= 1 else np.nan
-    nxt_iv = _atm_iv(chains[months[1]]) if len(months) >= 2 else np.nan
+    # 期限结构：与看板口径一致 —— 「建议合约月 − 其次月」。
+    # 若建议合约月就是最近月，则取紧随其后的那个月做次月。
+    if main_key in months:
+        mi = months.index(main_key)
+    else:
+        mi = 0
+    near_iv = _atm_iv(chains[months[mi]]) if len(months) > mi else np.nan
+    nxt_iv = _atm_iv(chains[months[mi + 1]]) if len(months) > mi + 1 else np.nan
     # 先把近月/次近月舍入到展示精度，再用它们算期限结构，
     # 保证前端「近月 - 次近月」与「期限结构」字段严格一致（避免 ±0.0001 的验算误差）。
     near_iv = round(near_iv, 4) if np.isfinite(near_iv) else np.nan
@@ -277,7 +368,9 @@ def _row_from_chain(name, chains, source_label):
         近月IV=(near_iv if np.isfinite(near_iv) else None),
         次近月IV=(nxt_iv if np.isfinite(nxt_iv) else None),
         期限结构=(round(term, 4) if np.isfinite(term) else None),
-        结构提示=source_label,
+        分位口径=pct_src,
+        口径合约月=mlabel,          # 看板 ATM IV / 分位 / 期限结构 统一取该月
+        结构提示=f'{source_label}（口径：{mlabel}；分位 {pct_src}）' if mlabel else source_label,
         数据源='实时', 触发原因=reason,
         更新时间=now_str[:16], 行情时间戳=now_str)
 
@@ -446,11 +539,25 @@ def _chains_for(name):
 
 
 def build_atm_table():
-    """合约IV对照表：7 标的 × 近月/次近月/远月，全部走实时链，带实时时间戳。"""
+    """合约IV对照表：7 标的 × 近月/次近月/远月，全部走实时链，带实时时间戳。
+
+    同时标出「口径月」——即该标的看板 ATM IV / IV分位 / 期限结构 实际采用的合约月
+    （按 DTE 优先级选出，通常与建议合约同月），便于用户对齐核对。
+    """
     now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
     out = []
     for name in ATM_ORDER:
         chains = _chains_for(name)
+        # 先按 DTE 优先级定出该标的的「口径月」
+        ref_key, ref_rank = None, (99, 9999)
+        for k in sorted(chains.keys()):
+            c = chains[k]
+            ds = pd.to_numeric(c['dte'], errors='coerce').dropna() if 'dte' in c.columns else pd.Series(dtype=float)
+            if not len(ds):
+                continue
+            r = _dte_rank(float(ds.median()))
+            if r < ref_rank:
+                ref_rank, ref_key = r, k
         # 每个月份算一条
         for mkey in sorted(chains.keys()):
             ch = chains[mkey]
@@ -466,10 +573,14 @@ def build_atm_table():
             # 低流动性：实时链本身档位有限（约 8~12 档），故以「<5 档 / 超远月 / IV 异常」判定
             low = bool(a['n'] < 5 or (dte is not None and dte > 200)
                        or (a['iv'] is not None and (a['iv'] < 0.05 or a['iv'] > 1.5)))
+            # 临近到期（<14 天）：IV 易被明显推高，单独标记以免误读
+            near_expiry = bool(dte is not None and dte < 14)
             out.append({
                 '合约月': str(mkey), '品种': name,
                 'ATM_IV': a['iv'], '平值行权价': a['strike'],
                 '剩余天数': dte, '样本数': a['n'],
+                '口径月': bool(mkey == ref_key),
+                '临近到期': near_expiry,
                 '行情时间戳': now_str, '低流动性': low})
     print(f"atm_table: {len(out)} 行（全实时 {now_str}）")
     return out
