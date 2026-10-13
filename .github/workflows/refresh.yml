@@ -69,3 +69,27 @@ jobs:
             git commit -m "数据更新 $(date -u +%Y-%m-%d_%H:%M) UTC"
             git push
           fi
+
+      # GitHub 的 schedule cron 高负载时会大幅降频甚至跳过（*/3 实测经常 10+ 分钟不触发）。
+      # 改为交易时段「自续跑」：每次跑完后 sleep 60s 再 dispatch 下一次，形成链条；
+      # cron 仅作兜底。链条断裂时（某次失败）由 cron 或手动触发恢复。
+      - name: 交易时段自续跑
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          H=$(date -u +%H%M); DOW=$(date -u +%u)
+          H10=$((10#$H))
+          IN_AM=$([ $H10 -ge $((10#0128)) ] && [ $H10 -le $((10#0332)) ] && echo 1 || echo 0)
+          IN_PM=$([ $H10 -ge $((10#0458)) ] && [ $H10 -le $((10#0702)) ] && echo 1 || echo 0)
+          if [ "$DOW" -le 5 ] && { [ "$IN_AM" = 1 ] || [ "$IN_PM" = 1 ]; }; then
+            sleep 60
+            for i in 1 2 3; do
+              curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/refresh.yml/dispatches" \
+                -d '{"ref":"main"}' -w "self-dispatch HTTP %{http_code}\n" && break || sleep 5
+            done
+          else
+            echo "非交易时段（UTC $H, dow=$DOW），不续跑"
+          fi
