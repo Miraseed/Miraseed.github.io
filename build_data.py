@@ -96,16 +96,48 @@ def is_market_open(t=None):
     return ((9 * 60 + 30) <= hm <= (11 * 60 + 30)) or ((13 * 60) <= hm <= (15 * 60))
 
 
+def _atm_sample(ch, n=10):
+    """取「平值样本」：按 |K−S| 排序，最接近现货的 n 档（认购+认沽合计）。
+
+    看板与合约对照表**共用**这一个选档逻辑，保证同一合约月的 ATM IV
+    在两张表里完全一致（避免同数据两套口径造成困惑）。
+
+    返回 (atm 切片, 现货价 S) 或 (None, nan)。
+    """
+    if ch is None or not len(ch) or 'strike' not in ch.columns:
+        return None, np.nan
+    c = ch.copy()
+    if 'iv' not in c.columns or c['iv'].notna().sum() == 0:
+        return None, np.nan
+    S = float(c['S'].iloc[0]) if 'S' in c.columns and pd.notna(c['S'].iloc[0]) else np.nan
+    if not np.isfinite(S):
+        return None, np.nan
+    c = c[c['iv'].notna()].copy()
+    if not len(c):
+        return None, np.nan
+    c['_m'] = (c['strike'] - S).abs()
+    return c.sort_values('_m').head(n), S
+
+
+def _atm_of_chain(ch):
+    """从一条链里取平值 IV / 平值行权价 / 样本数（对照表口径）。"""
+    atm, _ = _atm_sample(ch)
+    if atm is None or not len(atm):
+        return None
+    return dict(iv=_clean(atm['iv'].median()),
+                strike=_clean(atm['strike'].iloc[0]),
+                n=int(len(atm)))
+
+
 def _atm_iv(ch):
-    """从期权链取 ATM IV（Delta 口径平值中位数，dte<=120）。"""
-    if ch is None or not len(ch):
+    """从期权链取 ATM IV。
+
+    **统一采用「合约对照表」口径**（最近平值 10 档 IV 中位数），保证看板的
+    `ATM IV` / `期限结构` 与对照表逐行对得上。
+    """
+    atm, _ = _atm_sample(ch)
+    if atm is None or not len(atm):
         return np.nan
-    base = ch[ch['dte'] <= 120] if 'dte' in ch.columns else ch
-    if not len(base):
-        base = ch
-    atm = base[(base['delta'].abs() >= 0.35) & (base['delta'].abs() <= 0.65)]
-    if not len(atm):
-        atm = base
     iv = atm['iv'].dropna()
     return float(iv.median()) if len(iv) else np.nan
 
@@ -476,31 +508,6 @@ ATM_ORDER = ['科创50ETF', '创业板ETF', '上证50ETF', '沪深300ETF',
 ATM_PRODUCT = {'科创50ETF': '科创50ETF', '创业板ETF': '创业板ETF',
                '上证50ETF': '上证50ETF', '沪深300ETF': '沪深300ETF',
                '中证500ETF': '中证500ETF', '中证1000股指': 'MO', '铁矿石期权': 'i'}
-
-
-def _atm_of_chain(ch):
-    """从一条链里取平值 IV / 平值行权价 / 样本数（口径与原 panel 一致）。
-
-    平值样本 = 按 |K-S| 排序取最接近现货的若干档（认购+认沽合计最多 10 档），
-    这样实时链档位少时也能取到有意义的 ATM IV，不会被误判为「无样本」。
-    """
-    if ch is None or not len(ch) or 'strike' not in ch.columns:
-        return None
-    c = ch.copy()
-    if 'iv' not in c.columns or c['iv'].notna().sum() == 0:
-        return None
-    S = float(c['S'].iloc[0]) if 'S' in c.columns and pd.notna(c['S'].iloc[0]) else np.nan
-    if not np.isfinite(S):
-        return None
-    c = c[c['iv'].notna()].copy()
-    if not len(c):
-        return None
-    c['_m'] = (c['strike'] - S).abs()
-    c = c.sort_values('_m')
-    atm = c.head(10)                       # 最接近平值的 10 档
-    return dict(iv=_clean(atm['iv'].median()),
-                strike=_clean(atm['strike'].iloc[0]),
-                n=int(len(atm)))
 
 
 def _chains_for(name):
