@@ -145,9 +145,11 @@ def _exchange_rows():
     cache = load_json(CACHE, {})
     if cache.get('date') == today and cache.get('rows'):
         try:
-            age = (now - datetime.datetime.strptime(cache['at'], '%Y-%m-%d %H:%M:%S')).total_seconds() / 60
-            if age < CACHE_TTL_MIN:
-                print(f'[交易所日终] 命中缓存（{age:.0f} 分钟前）')
+            at = datetime.datetime.strptime(cache['at'], '%Y-%m-%d %H:%M:%S')
+            age = (now - at).total_seconds() / 60
+            # 时钟差可能让 age 为负（跨时区运行时）；取绝对值兜底，避免误判为过期
+            if abs(age) < CACHE_TTL_MIN:
+                print(f'[交易所日终] 命中缓存（{abs(age):.0f} 分钟前）')
                 return {str(r['标的']): r for r in cache['rows']}
         except Exception:
             pass
@@ -162,7 +164,6 @@ def _exchange_rows():
     rows = records(df)
     save_json(CACHE, {'date': today, 'at': now.strftime('%Y-%m-%d %H:%M:%S'), 'rows': rows})
     return {str(r['标的']): r for r in rows}
-
 
 def main():
     now = datetime.datetime.now()
