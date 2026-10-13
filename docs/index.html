@@ -209,7 +209,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 </div>
 
 <footer>
-  GitHub Pages 静态版：交易时段由 Actions 每30分钟自动更新 · 数据来自交易所公开接口，仅供参考，不构成投资建议<br>
+  GitHub Pages 静态版：交易时段每3分钟自动刷新（ETF 走新浪实时链，股指/商品走交易所日终）· 数据仅供参考，不构成投资建议<br>
   <span id="fPush"></span>
 </footer>
 
@@ -272,7 +272,7 @@ function card(r){
   if(r['触发原因'] && r['触发原因']!=='—')
     rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${r['触发原因']}</span></div>`);
   if(r['数据源']==='收盘回退')
-    rows.push(`<div class="row"><span class="rk">数据源</span><span class="rv" style="color:#e8a33d">上一交易日面板（当日IV未发布）</span></div>`);
+    rows.push(`<div class="row"><span class="rk">数据源</span><span class="rv" style="color:#e8a33d">日终快照（该标的暂无实时链）</span></div>`);
 
   const strat = r['建议策略'] ? `<div class="strat">${r['建议策略']}</div>` : '';
 
@@ -295,7 +295,7 @@ function render(s){
 
   $('mRun').textContent = (s.last_run||'—').slice(5,16);
   $('mState').innerHTML = s.ok
-    ? `<b>GitHub Actions</b> · 交易时段每30分钟更新`
+    ? `<b>实时</b> · 交易时段每3分钟刷新`
     : `<span style="color:#e8a33d">取数异常，显示上次数据</span>`;
   $('dot').classList.toggle('bad', !s.ok);
 
