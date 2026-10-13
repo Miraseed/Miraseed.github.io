@@ -281,6 +281,7 @@ def _row_from_chain(name, chains, source_label):
                     ATM_IV=None, IV分位=None, 信号='—',
                     建议策略='实时链取数失败，请稍后重试', 建议合约='—',
                     建议Delta=None, 剩余天数=None, 建议合约月=None,
+                    虚值程度=None,
                     近月IV=None, 次近月IV=None, 期限结构=None,
                     结构提示='—', 数据源='实时', 触发原因='—',
                     更新时间=now_str[:16], 行情时间戳=now_str)
@@ -348,8 +349,13 @@ def _row_from_chain(name, chains, source_label):
     term = (near_iv - nxt_iv) if (np.isfinite(near_iv) and np.isfinite(nxt_iv)) else np.nan
 
     mlabel = _short_month(best_key or main_key or '')
+    # 虚值程度 = |行权价 − 标的价格| / 标的价格（认沽虚值即 K 低于 S，展示取正值）
+    otm = np.nan
+    if best_put and best_put.get('strike') is not None and np.isfinite(S) and S > 0:
+        otm = abs(float(best_put['strike']) - S) / S
+    otm_txt = f'（虚{otm*100:.1f}%）' if np.isfinite(otm) else ''
     if best_put and best_put.get('strike') is not None:
-        contract = f"{mlabel} 认沽 K≈{best_put['strike']:.4g}"
+        contract = f"{mlabel} 认沽 K≈{best_put['strike']:.4g}{otm_txt}"
         delta_v, dte_v = best_put['delta'], best_put['dte']
     else:
         contract, delta_v, dte_v = '—', None, None
@@ -377,6 +383,7 @@ def _row_from_chain(name, chains, source_label):
         信号=sig, 建议策略=strat, 建议合约=contract,
         建议合约月=mlabel,
         建议行权价=(best_put['strike'] if best_put else None),
+        虚值程度=(round(otm, 4) if np.isfinite(otm) else None),   # |K−S|/S，认沽虚值取正值
         建议Delta=(round(delta_v, 3) if delta_v is not None else None),
         剩余天数=(dte_v if dte_v is not None else None),
         近月IV=(near_iv if np.isfinite(near_iv) else None),
@@ -621,6 +628,7 @@ def fetch_all():
                              ATM_IV=None, IV分位=None, 信号='—',
                              建议策略=f'取数异常：{str(e)[:60]}', 建议合约='—',
                              建议Delta=None, 剩余天数=None, 建议合约月=None,
+                             虚值程度=None,
                              近月IV=None, 次近月IV=None, 期限结构=None,
                              结构提示='—', 数据源='实时', 触发原因='—',
                              更新时间=now_str[:16], 行情时间戳=now_str))
@@ -667,7 +675,27 @@ def main():
             continue                     # 无法确定合约月的旧记录，丢弃
         km = re.search(r'K≈([\d.]+)', c)
         h['建议合约月'] = mk
-        h['建议合约'] = f"{mk} 认沽 K≈{km.group(1)}" if km else f"{mk} 认沽"
+        if km:
+            # 优先复用已有虚值后缀；旧记录没有则由「虚值程度」字段或 K/S 现算
+            ot = re.search(r'（虚([\d.]+)%）', c)
+            v = h.get('虚值程度')
+            if ot is None and v is None:
+                try:
+                    kk, ss = float(km.group(1)), float(h.get('S'))
+                    if ss > 0:
+                        v = abs(kk - ss) / ss
+                except (TypeError, ValueError):
+                    v = None
+            if ot is not None:
+                ot_pct = ot.group(1)
+            elif v is not None:
+                ot_pct = f'{float(v)*100:.1f}'
+            else:
+                ot_pct = None
+            h['建议合约'] = (f"{mk} 认沽 K≈{km.group(1)}（虚{ot_pct}%）" if ot_pct else
+                            f"{mk} 认沽 K≈{km.group(1)}")
+        else:
+            h['建议合约'] = f"{mk} 认沽"
         clean_hist.append(h)
     hist = clean_hist
     by_key = {(str(h.get('日期', ''))[:10], str(h.get('标的', ''))): h for h in hist}
@@ -680,6 +708,7 @@ def main():
                 信号=r.get('信号'), 建议合约=r.get('建议合约'),
                 建议合约月=r.get('建议合约月'),
                 建议Delta=r.get('建议Delta'), 剩余天数=r.get('剩余天数'),
+                虚值程度=r.get('虚值程度'),
                 触发原因=r.get('触发原因'))
     hist = list(by_key.values())[-500:]
 
