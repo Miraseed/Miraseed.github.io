@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import json
+import time
 import datetime
 import traceback
 
@@ -510,7 +511,7 @@ ATM_PRODUCT = {'科创50ETF': '科创50ETF', '创业板ETF': '创业板ETF',
                '中证500ETF': '中证500ETF', '中证1000股指': 'MO', '铁矿石期权': 'i'}
 
 
-def _chains_for(name):
+def _chains_for_raw(name):
     """取某标的的「多月链」：{月标签: DataFrame}，按月份升序。
 
     - ETF：逐月拉新浪 ETF 链（2610/2611/2612/2703…）
@@ -564,6 +565,25 @@ def _chains_for(name):
         if nz >= 2 and (dte is None or dte >= 0):
             clean[k] = ch
     return clean
+
+
+# 进程内短时链缓存：同一轮 build 里 fetch_all() 与 build_atm_table() 会各取一次链，
+# 若两次独立请求，低流动性品种（如铁矿石）报价可能在毫秒级刷新，导致
+# 看板 ATM IV 与对照表对不上。这里按标的缓存若干秒，保证同一轮内两者拿到同一份数据。
+_CHAIN_CACHE = {}
+_CHAIN_TTL = 120.0            # 秒；一轮 build 通常 <60s，足够覆盖
+
+
+def _chains_for(name, _ttl=None):
+    """带进程内短时缓存的 _chains_for_raw（见上方 TTL 说明）。"""
+    ttl = _CHAIN_TTL if _ttl is None else _ttl
+    hit = _CHAIN_CACHE.get(name)
+    if hit and (time.time() - hit[0]) < ttl:
+        return hit[1]
+    ch = _chains_for_raw(name)
+    if ch:                    # 只在取到有效数据时缓存（空结果不固化，便于下轮重试）
+        _CHAIN_CACHE[name] = (time.time(), ch)
+    return ch
 
 
 def build_atm_table():
