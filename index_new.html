@@ -249,8 +249,11 @@ function card(r){
   const hasChg = (chg!==null && chg!==undefined && !isNaN(chg));
   const dir = !hasChg ? 'flat' : (chg>0.0001?'up':(chg<-0.0001?'down':'flat'));
   const chgTxt = !hasChg ? '—' : ((chg>0?'+':'')+ (chg*100).toFixed(2) + '%');
+  // 展示小数位：优先后端给的「价格位数」（铁矿石=1 位，对齐期货通）；缺失则按量级推断
+  const _sx = _okNum(S);
+  const sDec = (_okNum(r['价格位数'])!==null) ? r['价格位数'] : (_sx!==null && Math.abs(_sx)>=1000 ? 2 : 4);
   const pxHtml = `<div class="c-px-wrap">
-      <span class="c-px ${dir!=='flat'?dir:''}">${num(S, S>=1000?2:4)}</span>
+      <span class="c-px ${dir!=='flat'?dir:''}">${num(S, sDec)}</span>
       <span class="c-chg ${dir}">${chgTxt}</span>
     </div>`;
 

@@ -251,6 +251,19 @@ def _pick_put(ch):
                 dte=(int(b['dte']) if 'dte' in puts.columns and np.isfinite(b['dte']) else None))
 
 
+# ---- 价格展示精度 --------------------------------------------------------
+# 商品期货（铁矿石）按同花顺期货通口径保留 1 位小数；指数/ETF 沿用原逻辑。
+def _price_decimals(name, value):
+    """返回该标的「展示价格」应保留的小数位数（与前端一致）。"""
+    if '铁矿石' in str(name):
+        return 1
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 4
+    return 2 if (np.isfinite(v) and abs(v) >= 1000) else 4
+
+
 def _row_from_chain(name, chains, source_label):
     """把「某标的的多月链」-> 一行看板记录。
 
@@ -264,7 +277,7 @@ def _row_from_chain(name, chains, source_label):
         chains = {_month_label(name, chains): chains}
     chains = {k: v for k, v in (chains or {}).items() if v is not None and len(v)}
     if not chains:
-        return dict(标的=name, 状态='数据缺失', S=None, 昨收=None, 涨跌幅=None,
+        return dict(标的=name, 状态='数据缺失', S=None, 价格位数=4, 昨收=None, 涨跌幅=None,
                     ATM_IV=None, IV分位=None, 信号='—',
                     建议策略='实时链取数失败，请稍后重试', 建议合约='—',
                     建议Delta=None, 剩余天数=None, 建议合约月=None,
@@ -356,6 +369,7 @@ def _row_from_chain(name, chains, source_label):
     return dict(
         标的=name, 状态='正常',
         S=round(S, 4) if np.isfinite(S) else None,
+        价格位数=_price_decimals(name, S),   # 铁矿石=1；其余 >=1000 用 2 位、否则 4 位
         昨收=None,
         涨跌幅=round(S_pct, 4) if np.isfinite(S_pct) else None,
         ATM_IV=round(iv, 4) if np.isfinite(iv) else None,
@@ -603,7 +617,7 @@ def fetch_all():
         except Exception as e:
             print(f'  {name} 取数异常: {type(e).__name__}: {str(e)[:70]}')
             now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
-            rows.append(dict(标的=name, 状态='异常', S=None, 昨收=None, 涨跌幅=None,
+            rows.append(dict(标的=name, 状态='异常', S=None, 价格位数=_price_decimals(name, None), 昨收=None, 涨跌幅=None,
                              ATM_IV=None, IV分位=None, 信号='—',
                              建议策略=f'取数异常：{str(e)[:60]}', 建议合约='—',
                              建议Delta=None, 剩余天数=None, 建议合约月=None,
