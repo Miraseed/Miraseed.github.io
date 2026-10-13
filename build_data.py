@@ -237,6 +237,10 @@ def _row_from_chain(name, chains, source_label):
     # 期限结构：近月 vs 次近月
     near_iv = _atm_iv(chains[months[0]]) if len(months) >= 1 else np.nan
     nxt_iv = _atm_iv(chains[months[1]]) if len(months) >= 2 else np.nan
+    # 先把近月/次近月舍入到展示精度，再用它们算期限结构，
+    # 保证前端「近月 - 次近月」与「期限结构」字段严格一致（避免 ±0.0001 的验算误差）。
+    near_iv = round(near_iv, 4) if np.isfinite(near_iv) else np.nan
+    nxt_iv = round(nxt_iv, 4) if np.isfinite(nxt_iv) else np.nan
     term = (near_iv - nxt_iv) if (np.isfinite(near_iv) and np.isfinite(nxt_iv)) else np.nan
 
     mlabel = _short_month(best_key or main_key or '')
@@ -270,8 +274,8 @@ def _row_from_chain(name, chains, source_label):
         建议行权价=(best_put['strike'] if best_put else None),
         建议Delta=(round(delta_v, 3) if delta_v is not None else None),
         剩余天数=(dte_v if dte_v is not None else None),
-        近月IV=(round(near_iv, 4) if np.isfinite(near_iv) else None),
-        次近月IV=(round(nxt_iv, 4) if np.isfinite(nxt_iv) else None),
+        近月IV=(near_iv if np.isfinite(near_iv) else None),
+        次近月IV=(nxt_iv if np.isfinite(nxt_iv) else None),
         期限结构=(round(term, 4) if np.isfinite(term) else None),
         结构提示=source_label,
         数据源='实时', 触发原因=reason,
