@@ -2,7 +2,7 @@ name: 刷新期权信号
 # 交易时段(北京时间 9:30-15:00)每3分钟跑一次；非交易时段降低频率省额度。
 # 北京时间 = UTC+8，cron 用 UTC。
 #   09:30-11:30 → UTC 01:30-03:30；13:00-15:00 → UTC 05:00-07:00
-# 说明：5 个 ETF 走新浪实时链（秒级），中证1000/铁矿石走交易所日终（带30分钟缓存）。
+# 说明：全部 7 个标的走新浪实时链（秒级，BS 反解 IV），全量约 3 秒。
 on:
   schedule:
     # 上午盘：每3分钟
@@ -60,7 +60,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 逐个 add：某个文件不存在时不影响其它文件入暂存区
-          for f in docs/data.enc.txt docs/history.json docs/push_state.json docs/ex_cache.json; do
+          for f in docs/data.enc.txt docs/history.json docs/push_state.json; do
             [ -f "$f" ] && git add "$f" || true
           done
           if git diff --cached --quiet; then

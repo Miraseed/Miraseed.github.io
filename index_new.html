@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#f5f6f8">
+<title>期权卖方信号监控</title>
+<style>
+:root{
+  /* 同花顺风格：浅灰底 + 白卡片 + 清晰分隔 */
+  --bg:#f4f5f7; --card:#ffffff; --line:#e6e8eb; --line2:#eef0f3;
+  --fg:#1a1a1a; --fg2:#4a4a4a; --fg3:#8a8f99;
+  --red:#e63946;        /* 涨 = 红 */
+  --red2:#ff6b6b;
+  --red-bg:#fdecee;
+  --green:#0f9d58;      /* 跌 = 绿 */
+  --green2:#34c759;
+  --green-bg:#e8f6ee;
+  --amber:#e8a33d;
+  --blue:#2b6cb0;
+  --blue-bg:#eaf1f9;
+  --radius:10px;
+  --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;
+  font-size:14px;line-height:1.5;padding-bottom:40px;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 14px}
+
+/* ---------- 顶栏 ---------- */
+header{
+  position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+}
+.hd{display:flex;align-items:center;gap:9px;padding:11px 0}
+.hd h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green2);flex:none;
+  box-shadow:0 0 0 0 rgba(52,199,89,.5);animation:pulse 2s infinite}
+.dot.bad{background:var(--red);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(52,199,89,.45)}70%{box-shadow:0 0 0 7px rgba(52,199,89,0)}100%{box-shadow:0 0 0 0 rgba(52,199,89,0)}}
+.hd .meta{margin-left:auto;font-size:11px;color:var(--fg3);text-align:right;line-height:1.35}
+.hd .meta b{color:var(--fg2);font-weight:500}
+
+/* ---------- 概览条 ---------- */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 4px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:10px;text-align:center;box-shadow:var(--shadow)}
+.stat .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat .k{font-size:10px;color:var(--fg3);margin-top:2px}
+.stat.hot .v{color:var(--red)}
+.stat.calm .v{color:var(--green)}
+
+/* ---------- 页签 ---------- */
+.tabs{display:flex;gap:6px;margin:14px 0 10px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;padding:7px 15px;border-radius:8px;background:var(--card);
+  border:1px solid var(--line);color:var(--fg2);font-size:13px;cursor:pointer;white-space:nowrap;
+  transition:.15s}
+.tab.on{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:600}
+
+/* ---------- 卡片 ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:14px;position:relative;overflow:hidden;box-shadow:var(--shadow)}
+.card.sig{border-color:rgba(230,57,70,.35);
+  background:linear-gradient(180deg,var(--red-bg),var(--card) 55%)}
+.card.sig::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--red)}
+.c-top{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.c-name{font-size:16px;font-weight:700;letter-spacing:.2px}
+.c-px-wrap{margin-left:auto;text-align:right;display:flex;align-items:baseline;gap:7px}
+.c-px{font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;letter-spacing:.2px}
+.c-chg{font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600;
+  padding:1px 7px;border-radius:5px}
+.c-chg.up{color:var(--red);background:var(--red-bg)}
+.c-chg.down{color:var(--green);background:var(--green-bg)}
+.c-chg.flat{color:var(--fg3);background:var(--line2)}
+.c-px.up{color:var(--red)} .c-px.down{color:var(--green)}
+.badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap;flex:none}
+.badge.sig{background:var(--red-bg);color:var(--red);border:1px solid rgba(230,57,70,.28)}
+.badge.wait{background:var(--line2);color:var(--fg3);border:1px solid var(--line)}
+.badge.err{background:#fdf3e3;color:var(--amber);border:1px solid rgba(232,163,61,.3)}
+
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);
+  border-radius:8px;overflow:hidden;margin-bottom:10px}
+.kv>div{background:#fafbfc;padding:8px 9px}
+.kv .k{font-size:10px;color:var(--fg3);margin-bottom:2px}
+.kv .v{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--fg)}
+.v.up{color:var(--red)} .v.down{color:var(--green)}
+
+/* IV 分位条 */
+.bar{height:4px;background:var(--line2);border-radius:3px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--blue);transition:width .5s}
+.bar i.hot{background:var(--red)} .bar i.quiet{background:var(--green)}
+
+.row{display:flex;gap:8px;font-size:12px;padding:5px 0;border-top:1px solid var(--line2)}
+.row .rk{color:var(--fg3);flex:none;min-width:58px}
+.row .rv{color:var(--fg2);word-break:break-all}
+.strat{background:var(--blue-bg);border-radius:8px;padding:9px 11px;font-size:12.5px;
+  color:var(--fg2);margin-top:9px;line-height:1.6;border-left:3px solid var(--blue)}
+.card.sig .strat{background:var(--red-bg);border-left-color:var(--red)}
+
+/* ---------- 表格 ---------- */
+.tblwrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  overflow:auto;-webkit-overflow-scrolling:touch;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:12.5px;white-space:nowrap}
+th{background:#fafbfc;color:var(--fg3);font-weight:600;font-size:11px;
+  text-align:left;padding:10px 11px;position:sticky;top:0;border-bottom:1px solid var(--line)}
+td{padding:9px 11px;border-bottom:1px solid var(--line2);
+  font-variant-numeric:tabular-nums;color:var(--fg2)}
+tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even){background:#fcfcfd}
+td.num{text-align:right}
+td.ts{color:var(--fg3);font-size:11.5px;white-space:nowrap}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;margin-left:5px}
+.tag.low{background:#fdf3e3;color:var(--amber)}
+.empty{padding:34px 16px;text-align:center;color:var(--fg3);font-size:13px}
+
+/* ---------- 底栏 ---------- */
+footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;line-height:1.8}
+.hide{display:none!important}
+
+/* ---------- 密码门（浅色） ---------- */
+#gate{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;
+  align-items:center;justify-content:center;padding:20px}
+#gate .gbox{background:var(--card);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow);padding:30px 26px;max-width:340px;width:100%;text-align:center}
+#gate .gicon{font-size:34px;margin-bottom:8px}
+#gate h2{font-size:16px;margin:0 0 6px;font-weight:700;color:var(--fg)}
+#gate p{font-size:12px;color:var(--fg3);margin:0 0 16px}
+#gate input{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line);
+  background:#fafbfc;color:var(--fg);font-size:15px;outline:none;text-align:center;
+  letter-spacing:1px;margin-bottom:10px}
+#gate input:focus{border-color:var(--blue)}
+#gate button{width:100%;padding:11px;border-radius:10px;border:none;background:var(--blue);
+  color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+#gate button:active{opacity:.85}
+#gate .gerr{color:var(--red);font-size:12px;min-height:16px;margin-top:8px}
+@media(max-width:420px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .grid{grid-template-columns:1fr}
+  .c-px{font-size:15px}
+}
+</style>
+</head>
+<body>
+
+<!-- 访问密码门 -->
+<div id="gate">
+  <div class="gbox">
+    <div class="gicon">🔐</div>
+    <h2>期权卖方信号监控</h2>
+    <p>私有页面，请输入访问密码</p>
+    <input type="password" id="gPwd" placeholder="访问密码" autocomplete="off">
+    <button id="gGo">进入</button>
+    <div class="gerr" id="gErr"></div>
+  </div>
+</div>
+
+<header>
+  <div class="wrap hd">
+    <span class="dot" id="dot"></span>
+    <h1>期权卖方信号监控</h1>
+    <div class="meta">
+      <div>数据 <b id="mRun">—</b></div>
+      <div id="mState">连接中…</div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stats">
+    <div class="stat" id="sPool"><div class="v">—</div><div class="k">监控标的</div></div>
+    <div class="stat hot" id="sSig"><div class="v">—</div><div class="k">触发信号</div></div>
+    <div class="stat calm" id="sWait"><div class="v">—</div><div class="k">观望</div></div>
+    <div class="stat" id="sCost"><div class="v">—</div><div class="k">刷新耗时</div></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" data-t="board">信号看板</div>
+    <div class="tab" data-t="atm">合约IV对照</div>
+    <div class="tab" data-t="hist">历史信号</div>
+  </div>
+
+  <section id="p-board"><div class="grid" id="board"></div></section>
+
+  <section id="p-atm" class="hide">
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th>合约月</th><th>品种</th><th style="text-align:right">ATM IV</th>
+          <th style="text-align:right">平值行权价</th><th style="text-align:right">剩余天数</th>
+          <th style="text-align:right">样本数</th><th>行情时间戳</th></tr></thead>
+        <tbody id="atmBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="p-hist" class="hide">
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th>触发时间</th><th>标的</th><th style="text-align:right">ATM IV</th>
+          <th style="text-align:right">IV分位</th><th>建议合约</th><th>触发原因</th></tr></thead>
+        <tbody id="histBody"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<footer>
+  GitHub Pages 静态版：交易时段每3分钟自动刷新（全部标的走新浪实时链，BS 反解 IV）· 各卡片与表格均标注行情时间戳 · 数据仅供参考，不构成投资建议<br>
+  <span id="fPush"></span>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const pct = (v,d=1) => (v===null||v===undefined||isNaN(v)) ? '—' : (v*100).toFixed(d)+'%';
+const num = (v,d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : Number(v).toFixed(d);
+let TIMER=null, FAILS=0;
+
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');
+    ['board','atm','hist'].forEach(k=>$('p-'+k).classList.toggle('hide', k!==t.dataset.t));
+  };
+});
+
+function card(r){
+  const isSig = String(r['信号']||'').includes('★');
+  const isErr = String(r['状态']||'')==='数据缺失' || String(r['状态']||'')==='异常';
+  const cls = isSig ? 'card sig' : 'card';
+  const badge = isSig ? '<span class="badge sig">★ 卖出认沽</span>'
+              : isErr ? '<span class="badge err">数据异常</span>'
+              : '<span class="badge wait">观望</span>';
+
+  // ---- 价格 + 涨跌幅（涨红跌绿）----
+  const S = r['S'], chg = r['涨跌幅'];
+  const hasChg = (chg!==null && chg!==undefined && !isNaN(chg));
+  const dir = !hasChg ? 'flat' : (chg>0.0001?'up':(chg<-0.0001?'down':'flat'));
+  const chgTxt = !hasChg ? '—' : ((chg>0?'+':'')+ (chg*100).toFixed(2) + '%');
+  const pxHtml = `<div class="c-px-wrap">
+      <span class="c-px ${dir!=='flat'?dir:''}">${num(S, S>=1000?2:4)}</span>
+      <span class="c-chg ${dir}">${chgTxt}</span>
+    </div>`;
+
+  const q = r['IV分位'];
+  const qcls = (q!==null&&q>=0.75) ? 'hot' : (q!==null&&q<=0.35 ? 'quiet' : '');
+  const w = (q!==null&&q!==undefined) ? Math.round(q*100) : 0;
+
+  const ts = r['期限结构'];
+  let tsHtml='—';
+  if(ts!==null&&ts!==undefined&&!isNaN(ts)){
+    const c = ts>=0.05?'up':(ts<=-0.03?'down':'');
+    tsHtml = `<span class="${c}">${(ts*100).toFixed(1)>0?'+':''}${(ts*100).toFixed(1)}%</span>`;
+  }
+
+  const kv = `
+    <div class="kv">
+      <div><div class="k">ATM IV</div><div class="v">${pct(r['ATM_IV'])}</div></div>
+      <div><div class="k">IV 分位</div><div class="v ${qcls==='hot'?'up':''}">${q===null||q===undefined?'—':Math.round(q*100)+'%'}
+        <div class="bar"><i class="${qcls}" style="width:${w}%"></i></div></div></div>
+      <div><div class="k">期限结构</div><div class="v">${tsHtml}</div></div>
+    </div>`;
+
+  const rows = [];
+  if(r['建议合约'] && r['建议合约']!=='—')
+    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv">${r['建议合约']}　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+  if(r['结构提示'] && r['结构提示']!=='—')
+    rows.push(`<div class="row"><span class="rk">数据来源</span><span class="rv">${r['结构提示']}</span></div>`);
+  if(r['触发原因'] && r['触发原因']!=='—')
+    rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${r['触发原因']}</span></div>`);
+  if(r['行情时间戳'])
+    rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${r['行情时间戳']}</span></div>`);
+
+  const strat = r['建议策略'] ? `<div class="strat">${r['建议策略']}</div>` : '';
+
+  return `<div class="${cls}">
+    <div class="c-top">
+      <span class="c-name">${r['标的']||'—'}</span>
+      ${badge}
+      ${pxHtml}
+    </div>
+    ${kv}${rows.join('')}${strat}
+  </div>`;
+}
+
+function render(s){
+  const rows = s.rows||[];
+  $('sPool').querySelector('.v').textContent = s.pool_size||rows.length||'—';
+  $('sSig').querySelector('.v').textContent = s.n_signal??'—';
+  $('sWait').querySelector('.v').textContent = rows.length ? (rows.length-(s.n_signal||0)) : '—';
+  $('sCost').querySelector('.v').textContent = s.cost_sec!=null ? s.cost_sec+'s' : '—';
+
+  $('mRun').textContent = (s.last_run||'—').slice(5,16);
+  $('mState').innerHTML = s.ok
+    ? `<b>实时</b> · 交易时段每3分钟刷新`
+    : `<span style="color:#e8a33d">取数异常，显示上次数据</span>`;
+  $('dot').classList.toggle('bad', !s.ok);
+
+  $('board').innerHTML = rows.length ? rows.map(card).join('')
+    : '<div class="empty">暂无数据，服务正在首次抓取…</div>';
+
+  const atm = s.atm_table||[];
+  $('atmBody').innerHTML = atm.length ? atm.map(a=>`<tr>
+    <td>${a['合约月']||''}</td>
+    <td>${a['品种']||''}</td>
+    <td class="num">${a['ATM_IV']!=null?Number(a['ATM_IV']*100).toFixed(2)+'%':'—'}</td>
+    <td class="num">${a['平值行权价']??'—'}</td>
+    <td class="num">${a['剩余天数']??'—'}</td>
+    <td class="num">${a['样本数']??'—'}${a['低流动性']?'<span class="tag low">低流动性</span>':''}</td>
+    <td class="ts">${a['行情时间戳']||'—'}</td>
+  </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
+
+  const hist = s.history||[];
+  $('histBody').innerHTML = hist.length ? hist.map(h=>`<tr>
+    <td class="ts">${h['时间戳']||h['日期']||''}</td>
+    <td>${h['标的']||''}</td>
+    <td class="num">${h['ATM_IV']!=null?pct(h['ATM_IV']):'—'}</td>
+    <td class="num">${h['IV分位']!=null?pct(h['IV分位'],0):'—'}</td>
+    <td>${h['建议合约']||'—'}</td>
+    <td>${h['触发原因']||'—'}</td>
+  </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无历史触发记录</td></tr>';
+
+  $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+}
+
+/* ---------- 密码门解密（AES-GCM + PBKDF2）：正确密码才解锁 ---------- */
+async function decryptBlob(pwd, blob){
+  const salt = Uint8Array.from(atob(blob.salt), c=>c.charCodeAt(0));
+  const iv   = Uint8Array.from(atob(blob.iv),   c=>c.charCodeAt(0));
+  const ct   = Uint8Array.from(atob(blob.ct),   c=>c.charCodeAt(0));
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey('raw', enc.encode(pwd), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt, hash:'SHA-256', iterations: blob.iter||100000},
+    base, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+let PWD = localStorage.getItem('om_pwd') || null;
+async function loadSnap(){
+  const r = await fetch('data.enc.txt?t='+Date.now(),{cache:'no-store'});
+  if(!r.ok) throw new Error('http '+r.status);
+  const blob = await r.json();
+  return await decryptBlob(PWD, blob);
+}
+
+async function pull(){
+  if(!PWD) return;
+  try{
+    const s = await loadSnap();
+    FAILS=0; render(s);
+  }catch(e){
+    FAILS++;
+    if(String(e).includes('OperationError') || String(e).includes('Cipher')){
+      PWD=null; localStorage.removeItem('om_pwd');
+      $('gate').classList.remove('hide');
+      $('gErr').textContent='密码已失效，请重新输入';
+      return;
+    }
+    $('dot').classList.add('bad');
+    $('mState').innerHTML='<span style="color:#e63946">连接失败，重试中…</span>';
+  }
+}
+async function tryGate(){
+  const pwd = $('gPwd').value.trim();
+  if(!pwd){ $('gErr').textContent='请输入密码'; return; }
+  $('gErr').textContent='验证中…';
+  const old = PWD; PWD = pwd;
+  try{
+    const s = await loadSnap();
+    localStorage.setItem('om_pwd', pwd);
+    $('gate').classList.add('hide');
+    FAILS=0; render(s);
+    $('gErr').textContent='';
+  }catch(e){
+    PWD = old;
+    $('gErr').textContent = (String(e).includes('OperationError') || String(e).includes('Cipher'))
+      ? '密码错误' : '数据加载失败，请稍后再试';
+  }
+}
+$('gGo').onclick = tryGate;
+$('gPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') tryGate(); });
+
+function startPolling(){
+  pull();
+  TIMER = setInterval(pull, 120000);   // 每2分钟拉一次最新数据
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pull(); });
+}
+if(PWD){ $('gate').classList.add('hide'); startPolling(); }
+else { $('gPwd').focus(); }
+</script>
+</body>
+</html>

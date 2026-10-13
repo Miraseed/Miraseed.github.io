@@ -114,6 +114,7 @@ td{padding:9px 11px;border-bottom:1px solid var(--line2);
 tr:last-child td{border-bottom:none}
 tbody tr:nth-child(even){background:#fcfcfd}
 td.num{text-align:right}
+td.ts{color:var(--fg3);font-size:11.5px;white-space:nowrap}
 .tag{font-size:10px;padding:1px 6px;border-radius:4px;margin-left:5px}
 .tag.low{background:#fdf3e3;color:var(--amber)}
 .empty{padding:34px 16px;text-align:center;color:var(--fg3);font-size:13px}
@@ -191,7 +192,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
       <table>
         <thead><tr><th>合约月</th><th>品种</th><th style="text-align:right">ATM IV</th>
           <th style="text-align:right">平值行权价</th><th style="text-align:right">剩余天数</th>
-          <th style="text-align:right">样本数</th></tr></thead>
+          <th style="text-align:right">样本数</th><th>行情时间戳</th></tr></thead>
         <tbody id="atmBody"></tbody>
       </table>
     </div>
@@ -200,7 +201,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   <section id="p-hist" class="hide">
     <div class="tblwrap">
       <table>
-        <thead><tr><th>日期</th><th>标的</th><th style="text-align:right">ATM IV</th>
+        <thead><tr><th>触发时间</th><th>标的</th><th style="text-align:right">ATM IV</th>
           <th style="text-align:right">IV分位</th><th>建议合约</th><th>触发原因</th></tr></thead>
         <tbody id="histBody"></tbody>
       </table>
@@ -209,7 +210,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 </div>
 
 <footer>
-  GitHub Pages 静态版：交易时段每3分钟自动刷新（ETF 走新浪实时链，股指/商品走交易所日终）· 数据仅供参考，不构成投资建议<br>
+  GitHub Pages 静态版：交易时段每3分钟自动刷新（全部标的走新浪实时链，BS 反解 IV）· 各卡片与表格均标注行情时间戳 · 数据仅供参考，不构成投资建议<br>
   <span id="fPush"></span>
 </footer>
 
@@ -268,11 +269,11 @@ function card(r){
   if(r['建议合约'] && r['建议合约']!=='—')
     rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv">${r['建议合约']}　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
   if(r['结构提示'] && r['结构提示']!=='—')
-    rows.push(`<div class="row"><span class="rk">结构提示</span><span class="rv">${r['结构提示']}</span></div>`);
+    rows.push(`<div class="row"><span class="rk">数据来源</span><span class="rv">${r['结构提示']}</span></div>`);
   if(r['触发原因'] && r['触发原因']!=='—')
     rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${r['触发原因']}</span></div>`);
-  if(r['数据源']==='收盘回退')
-    rows.push(`<div class="row"><span class="rk">数据源</span><span class="rv" style="color:#e8a33d">日终快照（该标的暂无实时链）</span></div>`);
+  if(r['行情时间戳'])
+    rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${r['行情时间戳']}</span></div>`);
 
   const strat = r['建议策略'] ? `<div class="strat">${r['建议策略']}</div>` : '';
 
@@ -306,15 +307,16 @@ function render(s){
   $('atmBody').innerHTML = atm.length ? atm.map(a=>`<tr>
     <td>${a['合约月']||''}</td>
     <td>${a['品种']||''}</td>
-    <td class="num">${a['ATM_IV']!=null?a['ATM_IV']*100 .toFixed(2)+'%':'—'}</td>
+    <td class="num">${a['ATM_IV']!=null?Number(a['ATM_IV']*100).toFixed(2)+'%':'—'}</td>
     <td class="num">${a['平值行权价']??'—'}</td>
     <td class="num">${a['剩余天数']??'—'}</td>
     <td class="num">${a['样本数']??'—'}${a['低流动性']?'<span class="tag low">低流动性</span>':''}</td>
-  </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无数据</td></tr>';
+    <td class="ts">${a['行情时间戳']||'—'}</td>
+  </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
 
   const hist = s.history||[];
   $('histBody').innerHTML = hist.length ? hist.map(h=>`<tr>
-    <td>${h['日期']||''}</td>
+    <td class="ts">${h['时间戳']||h['日期']||''}</td>
     <td>${h['标的']||''}</td>
     <td class="num">${h['ATM_IV']!=null?pct(h['ATM_IV']):'—'}</td>
     <td class="num">${h['IV分位']!=null?pct(h['IV分位'],0):'—'}</td>
