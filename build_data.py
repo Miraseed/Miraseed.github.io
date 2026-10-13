@@ -344,7 +344,9 @@ def _commodity_months_with_iv():
         if ch is not None and len(ch):
             nz = int((pd.to_numeric(ch['price'], errors='coerce') > 0).sum())
             if nz >= 2:
-                out[pz] = _commodity_iv_fill(ch)
+                # 统一月标签为纯数字（i2612 -> 2612），与 ETF / 中证1000 口径一致
+                mm = re.search(r'(\d{4})', pz)
+                out[mm.group(1) if mm else pz] = _commodity_iv_fill(ch)
     return out
 
 
@@ -403,7 +405,9 @@ def _chains_for(name):
             if ch is not None and len(ch):
                 ch = ch.copy()
                 ch['put'] = ch['cp'].eq('P')
-                out[str(code)] = ch
+                # 统一月标签为纯数字（MO2611 -> 2611），与 ETF 的 2611 口径一致
+                mm = re.search(r'(\d{4})(?=[CPcp]?\d*$)', str(code))
+                out[mm.group(1) if mm else str(code)] = ch
     elif name == '铁矿石期权':
         out = _commodity_months_with_iv()
     else:
