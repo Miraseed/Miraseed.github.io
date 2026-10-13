@@ -428,7 +428,8 @@ def _chains_for(name):
             if ch is not None and len(ch):
                 ch = ch.copy()
                 ch['put'] = ch['cp'].eq('P')
-                out[m] = ch
+                # 统一月标签为纯数字（2026-10 -> 2610），与中证1000/铁矿石口径一致
+                out[_short_month(m)] = ch
     # 只保留有报价且未到期的月
     clean = {}
     for k, ch in out.items():
