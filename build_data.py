@@ -505,6 +505,12 @@ def main():
 
     n_sig = int(sum(1 for r in rows if '★' in str(r.get('信号', ''))))
     n_real = sum(1 for r in rows if r.get('数据源') == '实时')
+    # 保护：实时取数成功的标的太少（多为限流/网络故障），保留旧数据，
+    # 避免用残缺数据覆盖线上（宁可展示稍旧的完整数据）。
+    n_ok = sum(1 for r in rows if r.get('状态') == '正常' and r.get('ATM_IV') is not None)
+    if n_ok < max(3, len(rows) // 2):
+        print(f'实时取数仅成功 {n_ok}/{len(rows)} 个标的，疑似限流/网络故障，保留旧数据')
+        return
 
     # ---- 历史信号累积（带秒级时间戳）----
     hist = load_json(HIST_JSON, [])

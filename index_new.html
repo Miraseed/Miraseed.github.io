@@ -216,8 +216,13 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 
 <script>
 const $ = id => document.getElementById(id);
-const pct = (v,d=1) => (v===null||v===undefined||isNaN(v)) ? '—' : (v*100).toFixed(d)+'%';
-const num = (v,d=2) => (v===null||v===undefined||isNaN(v)) ? '—' : Number(v).toFixed(d);
+// HTML 转义：数据字段一律先转义再拼进 innerHTML，防止注入
+const esc = v => String(v==null?'':v).replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// 数值守卫：空串/非数字统一返回 '—'，避免渲染出 NaN / 0.00
+const _okNum = v => (v===null||v===undefined||v===''||isNaN(v)) ? null : Number(v);
+const pct = (v,d=1) => { const x=_okNum(v); return x===null ? '—' : (x*100).toFixed(d)+'%'; };
+const num = (v,d=2) => { const x=_okNum(v); return x===null ? '—' : x.toFixed(d); };
 let TIMER=null, FAILS=0;
 
 document.querySelectorAll('.tab').forEach(t=>{
@@ -269,19 +274,19 @@ function card(r){
 
   const rows = [];
   if(r['建议合约'] && r['建议合约']!=='—')
-    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv">${r['建议合约']}　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv">${esc(r['建议合约'])}　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
   if(r['结构提示'] && r['结构提示']!=='—')
-    rows.push(`<div class="row"><span class="rk">数据来源</span><span class="rv">${r['结构提示']}</span></div>`);
+    rows.push(`<div class="row"><span class="rk">数据来源</span><span class="rv">${esc(r['结构提示'])}</span></div>`);
   if(r['触发原因'] && r['触发原因']!=='—')
-    rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${r['触发原因']}</span></div>`);
+    rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${esc(r['触发原因'])}</span></div>`);
   if(r['行情时间戳'])
-    rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${r['行情时间戳']}</span></div>`);
+    rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${esc(r['行情时间戳'])}</span></div>`);
 
-  const strat = r['建议策略'] ? `<div class="strat">${r['建议策略']}</div>` : '';
+  const strat = r['建议策略'] ? `<div class="strat">${esc(r['建议策略'])}</div>` : '';
 
   return `<div class="${cls}">
     <div class="c-top">
-      <span class="c-name">${r['标的']||'—'}</span>
+      <span class="c-name">${esc(r['标的']||'—')}</span>
       ${badge}
       ${pxHtml}
     </div>
@@ -307,23 +312,23 @@ function render(s){
 
   const atm = s.atm_table||[];
   $('atmBody').innerHTML = atm.length ? atm.map(a=>`<tr>
-    <td>${a['合约月']||''}</td>
-    <td>${a['品种']||''}</td>
-    <td class="num">${a['ATM_IV']!=null?Number(a['ATM_IV']*100).toFixed(2)+'%':'—'}</td>
-    <td class="num">${a['平值行权价']??'—'}</td>
+    <td>${esc(a['合约月']||'')}</td>
+    <td>${esc(a['品种']||'')}</td>
+    <td class="num">${pct(a['ATM_IV'],2)}</td>
+    <td class="num">${_okNum(a['平值行权价'])!==null?_okNum(a['平值行权价']):'—'}</td>
     <td class="num">${a['剩余天数']??'—'}</td>
     <td class="num">${a['样本数']??'—'}${a['低流动性']?'<span class="tag low">低流动性</span>':''}</td>
-    <td class="ts">${a['行情时间戳']||'—'}</td>
+    <td class="ts">${esc(a['行情时间戳']||'—')}</td>
   </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
 
   const hist = s.history||[];
   $('histBody').innerHTML = hist.length ? hist.map(h=>`<tr>
-    <td class="ts">${h['时间戳']||h['日期']||''}</td>
-    <td>${h['标的']||''}</td>
-    <td class="num">${h['ATM_IV']!=null?pct(h['ATM_IV']):'—'}</td>
-    <td class="num">${h['IV分位']!=null?pct(h['IV分位'],0):'—'}</td>
-    <td>${h['建议合约']||'—'}</td>
-    <td>${h['触发原因']||'—'}</td>
+    <td class="ts">${esc(h['时间戳']||h['日期']||'')}</td>
+    <td>${esc(h['标的']||'')}</td>
+    <td class="num">${pct(h['ATM_IV'])}</td>
+    <td class="num">${pct(h['IV分位'],0)}</td>
+    <td>${esc(h['建议合约']||'—')}</td>
+    <td>${esc(h['触发原因']||'—')}</td>
   </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无历史触发记录</td></tr>';
 
   $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
