@@ -68,14 +68,22 @@ jobs:
             echo "无变化，跳过提交"
           else
             git commit -m "数据更新 $(date -u +%Y-%m-%d_%H:%M) UTC"
-            git push
+            # 多个运行可能同时 push（人工触发 + 自续跑），冲突时 rebase 后重试，
+            # 避免整个 job 失败导致自续跑链断裂。
+            for i in 1 2 3 4 5; do
+              if git push 2>&1; then echo "push 成功"; break; fi
+              echo "push 失败，rebase 后重试 $i"
+              git pull --rebase -X ours origin main || git rebase --abort || true
+              sleep 5
+            done
           fi
 
       # GitHub 的 schedule cron 高负载时会大幅降频甚至跳过（*/3 实测经常 10+ 分钟不触发）。
       # 改为交易时段「自续跑」：每次跑完后 sleep 60s 再 dispatch 下一次，形成链条；
       # cron 仅作兜底。链条断裂时（某次失败）由 cron 或手动触发恢复。
+      # 用 always() 保证「提交失败」也不断链——否则一次 push 冲突会让链条停掉。
       - name: 交易时段自续跑
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
