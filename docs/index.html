@@ -238,9 +238,11 @@ document.querySelectorAll('.tab').forEach(t=>{
 
 function card(r){
   const isSig = String(r['信号']||'').includes('★');
+  const isHint = String(r['信号']||'').includes('仅观察');
   const isErr = String(r['状态']||'')==='数据缺失' || String(r['状态']||'')==='异常';
   const cls = isSig ? 'card sig' : 'card';
   const badge = isSig ? '<span class="badge sig">★ 卖出认沽</span>'
+              : isHint ? '<span class="badge wait">⊙ 仅观察</span>'
               : isErr ? '<span class="badge err">数据异常</span>'
               : '<span class="badge wait">观望</span>';
 
