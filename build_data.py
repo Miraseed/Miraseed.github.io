@@ -41,6 +41,12 @@ STATE_JSON = os.path.join(HERE, 'docs', 'push_state.json')
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 TARGET_DELTA = -0.15          # 建议合约的目标 Delta（与 monitor 一致，虚值认沽）
+CST = datetime.timezone(datetime.timedelta(hours=8))   # 北京时间（Actions 跑在 UTC）
+
+
+def now_cn():
+    """返回北京时间 datetime（naive，避免前端再转换）。"""
+    return datetime.datetime.now(CST).replace(tzinfo=None)
 
 
 def _clean(v):
@@ -79,7 +85,7 @@ def save_json(fp, obj):
 
 
 def is_market_open(t=None):
-    t = t or datetime.datetime.now()
+    t = t or now_cn()
     if t.weekday() >= 5:
         return False
     hm = t.hour * 60 + t.minute
@@ -118,7 +124,7 @@ def _pick_put(ch):
 
 def _row_from_chain(name, ch, source_label):
     """把一条实时期权链 -> 一行看板记录（含建议合约与行情时间戳）。"""
-    now = datetime.datetime.now()
+    now = now_cn()
     now_str = now.strftime('%Y-%m-%d %H:%M:%S')
     iv = _atm_iv(ch)
     if not np.isfinite(iv):
@@ -281,7 +287,7 @@ def _atm_of_chain(ch):
 def build_atm_table():
     """合约IV对照表：7 标的 × 近月/次近月/远月，全部走实时链，带实时时间戳。"""
     import sina_option as SO
-    now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
     out = []
     for name in ATM_ORDER:
         # 1) 取该标的的全部月份链
@@ -365,7 +371,7 @@ def fetch_all():
                 rows.append(_row_from_chain(name, ch, '实时链（新浪 BS 反解）'))
         except Exception as e:
             print(f'  {name} 取数异常: {type(e).__name__}: {str(e)[:70]}')
-            now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            now_str = now_cn().strftime('%Y-%m-%d %H:%M:%S')
             rows.append(dict(标的=name, 状态='异常', S=None, 昨收=None, 涨跌幅=None,
                              ATM_IV=None, IV分位=None, 信号='—',
                              建议策略=f'取数异常：{str(e)[:60]}', 建议合约='—',
@@ -377,7 +383,7 @@ def fetch_all():
 
 
 def main():
-    now = datetime.datetime.now()
+    now = now_cn()
     market_open = is_market_open(now)
 
     rows = fetch_all()
