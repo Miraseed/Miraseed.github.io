@@ -774,22 +774,25 @@ def main():
     hook = os.environ.get('WECOM_WEBHOOK', '').strip()
     if hook:
         sys.path.insert(0, os.path.join(CODE, 'web') if os.path.isdir(os.path.join(CODE, 'web')) else HERE)
+        # 推送状态必须落在 docs/ 下，才能被 workflow 提交回仓库（跨轮次保留去重状态）
+        os.environ['PUSH_STATE'] = STATE_JSON
         import push as PUSH
-        state = load_json(STATE_JSON, {'last_sig': {}})
-        prev = state.get('last_sig', {})
-        new_sig, pushed = {}, []
-        for r in rows:
-            name, sig = str(r.get('标的', '')), str(r.get('信号', ''))
-            new_sig[name] = sig
-            if '★' not in sig or prev.get(name) == sig:
-                continue
-            card = PUSH.build_signal_card(r, now)
+        import pandas as _pd
+        df = _pd.DataFrame(rows)
+        # 信号推送：当日已推送集合去重（同一标的当日只推一次，不因抖动漏推/重推）
+        res = PUSH.push_new_signals(df, now)
+        print('推送结果：', ', '.join(f'{n}:{"ok" if ok else "fail"}' for n, ok, _ in res) or '无新信号')
+        # 收盘日报兜底：收盘后（>=15:05）当日只发一次，汇总当日累计触发过的标的
+        state = PUSH._load_state()
+        if now.hour * 60 + now.minute >= 15 * 60 + 5 and state.get('digest_date') != today:
+            card = PUSH.build_daily_digest(df, now, fired_today=state.get('pushed'))
             ok, msg = PUSH.send_markdown(card, webhook=hook)
-            pushed.append(f'{name}:{"ok" if ok else "fail"}')
-            print(f'推送 {name}: {msg}')
-        state.update(last_sig=new_sig, last_run=snap['last_run'])
+            print(f'日报推送: {"ok" if ok else "fail"} {msg}')
+            if ok:
+                state['digest_date'] = today
+                PUSH._save_state(state)
+        state['last_run'] = snap['last_run']
         save_json(STATE_JSON, state)
-        print('推送结果：', ', '.join(pushed) or '无新信号')
 
 
 if __name__ == '__main__':
