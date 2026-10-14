@@ -776,11 +776,18 @@ def main():
         sys.path.insert(0, os.path.join(CODE, 'web') if os.path.isdir(os.path.join(CODE, 'web')) else HERE)
         # 推送状态必须落在 docs/ 下，才能被 workflow 提交回仓库（跨轮次保留去重状态）
         os.environ['PUSH_STATE'] = STATE_JSON
-        # 按文件路径精确加载推送模块，避免 sys.path 顺序导致命中同名旧副本
+        # 按文件路径精确加载推送模块，避免 sys.path 顺序导致命中同名旧副本。
+        # 候选路径覆盖：本地开发（PARENT/web）、Pages 部署（HERE/web）、
+        # 以及 code/web 存在时的特殊情况。
         import importlib.util as _ilu
-        _push_fp = os.path.join(CODE, 'web', 'push.py')
-        if not os.path.exists(_push_fp):
-            _push_fp = os.path.join(PARENT, 'web', 'push.py')
+        _cands = [
+            os.path.join(CODE, 'web', 'push.py'),
+            os.path.join(HERE, 'web', 'push.py'),
+            os.path.join(PARENT, 'web', 'push.py'),
+        ]
+        _push_fp = next((p for p in _cands if os.path.exists(p)), None)
+        if _push_fp is None:
+            raise RuntimeError(f'未找到 web/push.py，已尝试: {_cands}')
         _spec = _ilu.spec_from_file_location('push', _push_fp)
         PUSH = _ilu.module_from_spec(_spec)
         _spec.loader.exec_module(PUSH)
