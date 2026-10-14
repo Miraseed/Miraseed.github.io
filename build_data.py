@@ -776,7 +776,14 @@ def main():
         sys.path.insert(0, os.path.join(CODE, 'web') if os.path.isdir(os.path.join(CODE, 'web')) else HERE)
         # 推送状态必须落在 docs/ 下，才能被 workflow 提交回仓库（跨轮次保留去重状态）
         os.environ['PUSH_STATE'] = STATE_JSON
-        import push as PUSH
+        # 按文件路径精确加载推送模块，避免 sys.path 顺序导致命中同名旧副本
+        import importlib.util as _ilu
+        _push_fp = os.path.join(CODE, 'web', 'push.py')
+        if not os.path.exists(_push_fp):
+            _push_fp = os.path.join(PARENT, 'web', 'push.py')
+        _spec = _ilu.spec_from_file_location('push', _push_fp)
+        PUSH = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(PUSH)
         import pandas as _pd
         df = _pd.DataFrame(rows)
         # 信号推送：当日已推送集合去重（同一标的当日只推一次，不因抖动漏推/重推）
