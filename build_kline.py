@@ -139,8 +139,10 @@ def _sina_futures_kline(symbol='i0', cache_name='i0_daily.csv'):
         return None
     df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close'])
     df = df.sort_values('date').set_index('date').drop_duplicates()
-    if len(df) > 100:
-        df.to_csv(fp, index_label='date')
+    _today = pd.Timestamp(datetime.datetime.now(CST).date())
+    df_cache = df[df.index < _today]
+    if len(df_cache) > 100:
+        df_cache.to_csv(fp, index_label='date')
     return df
 
 
@@ -167,8 +169,49 @@ def _sina_index_kline(symbol, cache_name, datalen=1023):
                         float(r['low']), float(r['close'])) for r in arr],
                       columns=['date', 'open', 'high', 'low', 'close'])
     df = df.sort_values('date').set_index('date').drop_duplicates()
-    if len(df) > 100:
-        df.to_csv(fp, index_label='date')
+    # 当日盘中 bar 不落缓存（避免未完成 K 线被永久固化）
+    _today = pd.Timestamp(datetime.datetime.now(CST).date())
+    df_cache = df[df.index < _today]
+    if len(df_cache) > 100:
+        df_cache.to_csv(fp, index_label='date')
+    return df
+
+
+def _east_futures_kline(secid='114.im', cache_name='im_daily.csv', lmt=1500):
+    """东财期货主连日线（铁矿石主连 114.im 与新浪 i0 同源），自带当日实时 bar。
+    返回 date/open/high/low/close df；失败返回 None。"""
+    fp = os.path.join(PANEL, cache_name)
+    if os.path.exists(fp):
+        d = pd.read_csv(fp, parse_dates=['date'])
+        if len(d) > 100:
+            return d.set_index('date')
+    import urllib.request
+    url = (f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}'
+           f'&klt=101&fqt=0&lmt={lmt}&end=20500101&fields1=f1,f2,f3'
+           '&fields2=f51,f52,f53,f54,f55,f56')
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0',
+                                               'Referer': 'https://quote.eastmoney.com/'})
+    try:
+        d = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        kl = d.get('data', {}).get('klines') or []
+    except Exception:
+        return None
+    if not kl:
+        return None
+    rows = []
+    for line in kl:      # date,open,close,high,low,volume
+        p = line.split(',')
+        try:
+            rows.append((pd.Timestamp(p[0]), float(p[1]), float(p[3]),
+                         float(p[4]), float(p[2])))
+        except Exception:
+            continue
+    df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close'])
+    df = df.sort_values('date').set_index('date').drop_duplicates()
+    _today = pd.Timestamp(datetime.datetime.now(CST).date())
+    df_cache = df[df.index < _today]   # 当日实时 bar 不落缓存
+    if len(df_cache) > 100:
+        df_cache.to_csv(fp, index_label='date')
     return df
 
 
@@ -187,23 +230,108 @@ def ohlc_of(name):
         k = _sina_index_kline(sina, '000852_daily.csv', 1500)
         return k, atm_series('MO')
     if prod == 'i':
-        # 铁矿石主连日线（i0），替代 io_iv 的期权合约价格
-        k = _sina_futures_kline('i0', 'i0_daily.csv')
+        # 铁矿石主连日线（东财 114.im，与新浪 i0 同源且盘中自带当日实时 bar）
+        k = _east_futures_kline('114.im', 'im_daily.csv')
         return k, atm_series('i')
     # ETF：新浪日线真实 OHLC
     k = _sina_index_kline(sina, f'{sina}_daily.csv', 1500)
     return k, atm_series(prod)
 
 
+def _sina_realtime(names):
+    """批量取新浪实时行情，拼当日盘中 bar。
+    返回 {name: dict(open, high, low, last, date)}；取不到的标的不在返回值里。"""
+    import urllib.request
+    qs, q2n = [], {}
+    for n in names:
+        cfg = PRODUCTS[n]
+        q = cfg['sina'] if cfg['prod'] != 'i' else 'nf_i0'
+        qs.append(q)
+        q2n[q] = n
+    url = 'https://hq.sinajs.cn/list=' + ','.join(qs)
+    req = urllib.request.Request(url, headers={'Referer': 'https://finance.sina.com.cn/',
+                                               'User-Agent': 'Mozilla/5.0'})
+    try:
+        raw = urllib.request.urlopen(req, timeout=15).read().decode('gbk', 'ignore')
+    except Exception:
+        return {}
+    out = {}
+    for line in raw.strip().splitlines():
+        if '=' not in line:
+            continue
+        q = line.split('hq_str_')[1].split('=')[0].strip()
+        body = line.split('=', 1)[1].strip().strip(';').strip('"')
+        f = body.split(',') if body else []
+        n = q2n.get(q)
+        if not n:
+            continue
+        try:
+            if q.startswith('nf_'):
+                # 期货：名称,开,高,低,昨结,买价,卖价,持仓?,...,现价,日期,时间
+                if len(f) < 10 or not f[1]:
+                    continue
+                last = next((x for x in (f[8], f[3]) if x and float(x) > 0), None)
+                d = dict(open=float(f[1]), high=float(f[2]), low=float(f[3]),
+                         last=float(last), date=(f[-2] if len(f) >= 3 else ''))
+            else:
+                # 股票/ETF/指数：名称,今开,昨收,现价,最高,最低,...,日期,时间
+                if len(f) < 32 or not f[1]:
+                    continue
+                d = dict(open=float(f[1]), high=float(f[4]), low=float(f[5]),
+                         last=float(f[3]), date=f[30])
+            if d['last'] and d['last'] > 0:
+                out[n] = d
+        except Exception:
+            continue
+    return out
+
+
+def _today_iv_from_dashboard():
+    """从看板 data.json 取各标的实时 ATM IV（仅当看板是今日数据才有效）。
+    返回 {标的: iv}。"""
+    fp = os.path.join(HERE, 'docs', 'data.json')
+    try:
+        d = json.load(open(fp, encoding='utf-8'))
+    except Exception:
+        return {}
+    today = str(datetime.datetime.now(CST).date())
+    stamp = str(d.get('last_run') or '')[:10]
+    if stamp != today:
+        return {}   # 看板数据不是今日的（如本地旧快照），不采用
+    out = {}
+    for r in d.get('rows', []):
+        try:
+            if r.get('ATM_IV') and r.get('状态') == '正常':
+                out[r['标的']] = float(r['ATM_IV'])
+        except Exception:
+            continue
+    return out
+
+
 def build():
     out = {'updated': datetime.datetime.now(CST).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S'),
            'products': {}}
+    today = pd.Timestamp(datetime.datetime.now(CST).date())
+    # 当日实时：盘后日线缓存可能已含今日；盘中则用实时接口拼当日 bar + 看板实时 IV
+    rt = _sina_realtime(list(PRODUCTS))
+    dash_iv = _today_iv_from_dashboard()
     for name, cfg in PRODUCTS.items():
         try:
             k, iv = ohlc_of(name)
             if k is None or iv is None or not len(k):
                 print(f'  [kline跳过] {name}: 数据缺失')
                 continue
+            live_bar = None
+            if k.index[-1] < today and rt.get(name):
+                r = rt[name]   # 实时接口返回的当日盘中 bar
+                live_bar = pd.Series({'open': r['open'], 'high': r['high'],
+                                      'low': r['low'], 'close': r['last']})
+            if live_bar is not None:
+                k = pd.concat([k, live_bar.to_frame().T.rename(lambda _: today)])
+                k = k[~k.index.duplicated(keep='last')].sort_index()
+                # 当日实时 IV（看板同源），拼到 IV 序列尾部
+                if name in dash_iv:
+                    iv = pd.concat([iv, pd.Series([dash_iv[name]], index=[today])])
             iv = iv.reindex(iv.index.union(k.index)).ffill().reindex(k.index)
             pct = rolling_pct(iv)
             sig = ((pct >= cfg['pct_th'])
@@ -219,9 +347,13 @@ def build():
                              round(float(r['low']), 4), round(float(r['close']), 4)])
                 pcts.append(round(float(p), 3) if p == p and p is not None else None)
                 sigs.append(int(bool(sig.get(day))))
+            iv_from = str(iv.dropna().index.min().date()) if iv.notna().any() else None
             out['products'][name] = dict(th=cfg['pct_th'], iv_th=cfg['iv_th'],
+                                         iv_from=iv_from,
+                                         live=str(k.index[-1].date()) == str(today.date()),
                                          bars=bars, pct=pcts, sig=sigs)
-            print(f'  [kline] {name}: {len(bars)} 根, 信号日 {sum(sigs)} 个')
+            tag = '（含实时当日）' if out['products'][name]['live'] else ''
+            print(f'  [kline] {name}: {len(bars)} 根{tag}, 信号日 {sum(sigs)} 个')
         except Exception as e:
             print(f'  [kline错误] {name}: {e}')
     with open(OUT, 'w', encoding='utf-8') as f:

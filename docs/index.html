@@ -427,11 +427,12 @@ function drawKline(){
   const chg = prev ? (last[4]/prev[4]-1) : null;
   const dec = last[4]>=1000?2:(last[4]>=10?2:4);
   $('kMeta').innerHTML = [
-    ['最新收盘', `${last[4].toFixed(dec)}　<span style="color:${chg>0?red:(chg<0?green:fg2)}">${chg==null?'—':((chg>0?'+':'')+(chg*100).toFixed(2)+'%')}</span>`],
+    [(p.live?'最新盘中':'最新收盘'), `${last[4].toFixed(dec)}　<span style="color:${chg>0?red:(chg<0?green:fg2)}">${chg==null?'—':((chg>0?'+':'')+(chg*100).toFixed(2)+'%')}</span>${p.live?'　<span style="color:#e6a23c;font-size:11px">● 实时</span>':''}`],
     ['区间', `${bars[0][0]} ~ ${last[0]}（${n} 根）`],
     ['信号阈值', `IV分位 ≥ ${(p.th*100).toFixed(0)}%${p.iv_th?` 且 ATM IV ≥ ${(p.iv_th*100).toFixed(0)}%`:''}`],
     ['区间信号日', `${cnt} 天`],
     ['当前IV分位', pcts[n-1]==null?'—':`${(pcts[n-1]*100).toFixed(0)}%`],
+    ['IV数据起点', p.iv_from?`${p.iv_from}（期权上市，之前无 IV 数据）`:'—'],
   ].map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('');
   if(KHOV < 0)
     $('kTip').textContent = '长按/移动查看每日详情；▲ 为当日触发卖沽信号的交易日';
@@ -453,6 +454,7 @@ function klineHover(clientX){
   $('kTip').innerHTML = `<b>${esc(b[0])}</b>　开 ${b[1].toFixed(dec)}　高 ${b[2].toFixed(dec)}　`
     + `低 ${b[3].toFixed(dec)}　收 <b>${b[4].toFixed(dec)}</b>（${cc}）　`
     + `IV分位 ${pcts[best]==null?'—':(pcts[best]*100).toFixed(0)+'%'}`
+    + (best===n-1 && KL.products[$('kProd').value]?.live ? '　<span style="color:#e6a23c">● 实时</span>' : '')
     + (sigs[best]?'　<span style="color:#ff5a5f;font-weight:700">▲ 卖沽信号</span>':'');
   drawKline();
 }
