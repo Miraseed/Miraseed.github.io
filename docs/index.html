@@ -277,8 +277,10 @@ document.querySelectorAll('.tab').forEach(t=>{
 
 /* ================= K线复盘（Canvas 手绘，风格参考同花顺期货通） ================= */
 let KL = null;            // kline.json 全量
-let KN = 9999;            // 显示根数（默认全部：2020-11-16 起）
+let KN = 9999;            // 可视根数（默认全部）
+let KV0 = 0;              // 可视起点在全集中的索引（缩放/拖动）
 let KHOV = -1;            // 悬浮索引
+let KYHV = -1;            // 悬浮 Y 像素（十字横线）
 const KMAS = [[5,'#e8a33d'],[10,'#4a9eff'],[20,'#c77dff'],[60,'#7bd88f']];
 
 function maAt(closes, i, n){
@@ -286,14 +288,20 @@ function maAt(closes, i, n){
   let s=0; for(let k=i-n+1;k<=i;k++) s+=closes[k];
   return s/n;
 }
+function kview(total){
+  KN = Math.max(15, Math.min(KN, total));
+  if(KV0 + KN > total) KV0 = total - KN;
+  if(KV0 < 0) KV0 = 0;
+}
 
 function drawKline(){
   const cv = $('kCv'); if(!cv || !KL) return;
   const name = $('kProd').value;
   const p = KL.products[name]; if(!p) return;
   const total = p.bars.length;
-  const n = Math.min(KN, total);
-  const bars = p.bars.slice(total-n), pcts = p.pct.slice(total-n), sigs = p.sig.slice(total-n);
+  kview(total);
+  const bars = p.bars.slice(KV0, KV0+KN), pcts = p.pct.slice(KV0, KV0+KN), sigs = p.sig.slice(KV0, KV0+KN);
+  const n = bars.length;
   const closes = bars.map(b=>b[4]);
   const mas = KMAS.map(([m,c])=>({m,c,arr:bars.map((_,i)=>maAt(closes,i,m))})).filter(x=>x.arr.some(v=>v!=null));
 
@@ -301,7 +309,7 @@ function drawKline(){
   const dpr = window.devicePixelRatio||1;
   const W = cv.parentElement.clientWidth - 12;
   const H = Math.max(340, Math.min(460, W*0.72));
-  const PADL=8, PADR=56, PADT=10;
+  const PADL=52, PADR=10, PADT=10;
   const volH = 52;                      // IV分位副图高
   const gap = 16;
   const mainH = H - PADT - volH - gap - 20;   // 20 给底部日期
@@ -311,6 +319,7 @@ function drawKline(){
   const css = getComputedStyle(document.documentElement);
   const C = k => css.getPropertyValue(k).trim();
   const fg = C('--fg')||'#e6e6e6', fg2 = C('--fg2')||'#9aa0a6', line = C('--line')||'#2a2f3a';
+  const blue = C('--blue')||'#2f6fd6';
   const red = '#e63946', green = '#26a65b';
   g.clearRect(0,0,W,H);
 
@@ -325,16 +334,17 @@ function drawKline(){
   const cw = Math.max(1, Math.min(9, bw*0.68));
   const Y = v => PADT + (hi-v)/(hi-lo)*mainH;
   const X = i => x0 + (i+0.5)*bw;
+  const pv = y => hi - (y-PADT)/mainH*(hi-lo);   // 像素 -> 价格
 
-  // 网格 + 右侧价格刻度
+  // 网格 + 左侧价格刻度
   g.strokeStyle = line; g.lineWidth = 1; g.globalAlpha = .55;
-  g.font = '10px -apple-system,sans-serif'; g.textAlign='left'; g.textBaseline='middle';
+  g.font = '10px -apple-system,sans-serif'; g.textAlign='right'; g.textBaseline='middle';
   for(let i=0;i<=4;i++){
     const y = PADT + mainH*i/4, v = hi - (hi-lo)*i/4;
     g.beginPath(); g.moveTo(x0,y); g.lineTo(x0+plotW,y); g.stroke();
     g.globalAlpha=1; g.fillStyle=fg2;
     const dec = v>=1000?0:(v>=10?1:3);
-    g.fillText(v.toFixed(dec), x0+plotW+6, y);
+    g.fillText(v.toFixed(dec), x0-6, y);
     g.globalAlpha=.55;
   }
   g.globalAlpha=1;
@@ -385,7 +395,7 @@ function drawKline(){
   g.beginPath(); g.moveTo(x0, VY(p.th)); g.lineTo(x0+plotW, VY(p.th)); g.stroke();
   g.setLineDash([]);
   g.fillStyle='rgba(255,90,95,.9)';
-  g.fillText((p.th*100).toFixed(0)+'%', x0+plotW+6, VY(p.th));
+  g.textAlign='right'; g.fillText((p.th*100).toFixed(0)+'%', x0-6, VY(p.th)); g.textAlign='left';
   // 分位折线
   g.strokeStyle='#4a9eff'; g.lineWidth=1.3; g.beginPath();
   let st2=false;
@@ -405,12 +415,35 @@ function drawKline(){
   });
   g.textAlign='left';
 
-  // 悬浮十字线
+  // 悬浮十字线（竖线 + 横线 + 蓝底坐标标签，参考同花顺）
   if(KHOV>=0 && KHOV<n){
     const i=KHOV, x=X(i);
-    g.strokeStyle='rgba(200,200,200,.5)'; g.setLineDash([3,3]); g.lineWidth=1;
+    const yv = KYHV>=PADT && KYHV<=PADT+mainH ? KYHV : Y(bars[i][4]);
+    g.strokeStyle='rgba(170,180,200,.6)'; g.setLineDash([4,3]); g.lineWidth=1;
     g.beginPath(); g.moveTo(x,PADT); g.lineTo(x,PADT+mainH+gap+volH); g.stroke();
+    g.beginPath(); g.moveTo(x0,yv); g.lineTo(x0+plotW,yv); g.stroke();
     g.setLineDash([]);
+    // 底部日期标签（蓝底）
+    const dtxt = bars[i][0];
+    g.font='11px -apple-system,sans-serif';
+    const dw = g.measureText(dtxt).width + 12;
+    const dx = Math.max(x0, Math.min(x-dw/2, x0+plotW-dw));
+    g.fillStyle=blue;
+    g.fillRect(dx, H-17, dw, 15);
+    g.fillStyle='#fff'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(dtxt, dx+dw/2, H-9.5);
+    // 左侧价格标签（蓝底，主图区）
+    if(yv>=PADT && yv<=PADT+mainH){
+      const v = pv(yv);
+      const dec = v>=1000?0:(v>=10?2:3);
+      const ptxt = v.toFixed(dec);
+      const pw2 = g.measureText(ptxt).width + 10;
+      g.fillStyle=blue;
+      g.fillRect(2, yv-8, Math.max(pw2, PADL-6), 16);
+      g.fillStyle='#fff';
+      g.fillText(ptxt, 2+(Math.max(pw2, PADL-6))/2, yv);
+    }
+    g.textAlign='left'; g.textBaseline='alphabetic';
   }
 
   // 图例
@@ -419,8 +452,8 @@ function drawKline(){
     + `<i><s style="background:#ff5a5f;border-radius:50%"></s>信号日</i>`
     + `<i><s style="background:#4a9eff"></s>IV分位</i>`;
 
-  // 赋值给悬浮/触摸事件使用
-  cv._ctx = {X, Y, VY, n, bars, pcts, sigs, x0, plotW, mainH, PADT, gap, volH};
+  // 赋值给交互事件使用
+  cv._ctx = {X, Y, VY, n, bars, pcts, sigs, x0, plotW, mainH, PADT, gap, volH, hi, lo, total};
   // 底部数值表
   const cnt = sigs.reduce((a,b)=>a+b,0);
   const last = bars[n-1], prev = n>1?bars[n-2]:null;
@@ -435,18 +468,19 @@ function drawKline(){
     ['IV数据起点', p.iv_from?`${p.iv_from}（期权上市，之前无 IV 数据）`:'—'],
   ].map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('');
   if(KHOV < 0)
-    $('kTip').textContent = '长按/移动查看每日详情；▲ 为当日触发卖沽信号的交易日';
+    $('kTip').textContent = '滚轮/双指缩放 · 拖动平移 · 移动查看每日详情；▲ 为当日触发卖沽信号的交易日';
 }
 
-function klineHover(clientX){
+function klineHover(clientX, clientY){
   const cv=$('kCv'); if(!cv||!cv._ctx) return;
   const r = cv.getBoundingClientRect();
-  const {X, n, bars, pcts, sigs} = cv._ctx;
-  const x = clientX - r.left;
+  const {X, n, bars, pcts, sigs, mainH, PADT} = cv._ctx;
+  const x = clientX - r.left, y = clientY - r.top;
   let best=-1, bd=1e9;
   for(let i=0;i<n;i++){ const d=Math.abs(X(i)-x); if(d<bd){bd=d;best=i;} }
-  if(bd > 24){ KHOV=-1; return; }
-  if(best===KHOV) return;
+  if(bd > 40){ KHOV=-1; return; }
+  KYHV = Math.max(PADT, Math.min(mainH+PADT, y));
+  if(best===KHOV) { drawKline(); return; }
   KHOV=best;
   const b=bars[best], dec=b[4]>=1000?2:(b[4]>=10?2:4);
   const ch = best>0 ? bars[best-1][4] : null;
@@ -459,21 +493,91 @@ function klineHover(clientX){
   drawKline();
 }
 
+// ---- 缩放 / 拖动（滚轮 + 鼠标拖动 + 触摸双指捏合）----
+function kZoom(cursorX, factor){
+  const cv=$('kCv'); if(!cv||!cv._ctx) return;
+  const {x0, plotW, n} = cv._ctx;
+  const total = KL.products[$('kProd').value].bars.length;
+  const frac = Math.max(0, Math.min(1, (cursorX - x0) / plotW));
+  const anchor = KV0 + Math.floor(frac * n);          // 光标处的全局索引
+  const newN = Math.max(15, Math.min(total, Math.round(KN * factor)));
+  KV0 = Math.round(anchor - frac * newN);
+  KN = newN;
+  kview(total);
+  drawKline();
+}
 function initKline(){
   if(!KL) return;
   const sel=$('kProd');
   if(!sel.options.length){
     sel.innerHTML = Object.keys(KL.products).map(k=>`<option>${esc(k)}</option>`).join('');
-    sel.onchange = ()=>{ KHOV=-1; drawKline(); };
+    sel.onchange = ()=>{ KHOV=-1; KYHV=-1;
+      KV0 = Math.max(0, KL.products[sel.value].bars.length - KN); drawKline(); };
     document.querySelectorAll('.kchip').forEach(c=>{
       c.onclick=()=>{ document.querySelectorAll('.kchip').forEach(x=>x.classList.remove('on'));
-        c.classList.add('on'); KN=+c.dataset.n; KHOV=-1; drawKline(); };
+        c.classList.add('on'); KN=+c.dataset.n; KHOV=-1; KYHV=-1;
+        KV0 = Math.max(0, KL.products[sel.value].bars.length - Math.min(KN, KL.products[sel.value].bars.length));
+        drawKline(); };
     });
     const cv=$('kCv');
-    cv.addEventListener('mousemove', e=>klineHover(e.clientX));
-    cv.addEventListener('mouseleave', ()=>{ KHOV=-1; drawKline(); });
-    cv.addEventListener('touchstart', e=>{ if(e.touches[0]) klineHover(e.touches[0].clientX); },{passive:true});
-    cv.addEventListener('touchmove', e=>{ if(e.touches[0]) klineHover(e.touches[0].clientX); },{passive:true});
+    // 滚轮缩放（以光标为锚点）
+    cv.addEventListener('wheel', e=>{
+      e.preventDefault();
+      if(!cv._ctx) return;
+      const r = cv.getBoundingClientRect();
+      kZoom(e.clientX - r.left, e.deltaY < 0 ? 0.82 : 1/0.82);
+    }, {passive:false});
+    // 指针事件：单指拖动平移，双指捏合缩放，悬停十字线
+    const ptrs = new Map();
+    let dragStart = null, pinch0 = null;
+    cv.addEventListener('pointerdown', e=>{
+      cv.setPointerCapture(e.pointerId);
+      ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(ptrs.size === 1){
+        dragStart = {x:e.clientX, kv0:KV0};
+      }else if(ptrs.size === 2){
+        dragStart = null;
+        const [a,b] = [...ptrs.values()];
+        pinch0 = {d: Math.abs(a.x-b.x)||1, n:KN,
+                  mid:(a.x+b.x)/2};
+      }
+    });
+    cv.addEventListener('pointermove', e=>{
+      if(!ptrs.has(e.pointerId)){        // 纯悬停
+        klineHover(e.clientX, e.clientY); return;
+      }
+      ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(ptrs.size === 2 && pinch0){
+        const [a,b] = [...ptrs.values()];
+        const d = Math.abs(a.x-b.x)||1;
+        const r = cv.getBoundingClientRect();
+        KHOV=-1; KYHV=-1;
+        kZoom(pinch0.mid - r.left, Math.max(0.2, Math.min(5, pinch0.d/d)));
+        return;
+      }
+      if(dragStart && cv._ctx){
+        const {plotW, n} = cv._ctx;
+        const total = KL.products[$('kProd').value].bars.length;
+        const bw = plotW/n;
+        const shift = Math.round((e.clientX - dragStart.x)/bw);
+        KHOV=-1; KYHV=-1;
+        KV0 = Math.max(0, Math.min(total-KN, dragStart.kv0 - shift));
+        drawKline();
+      }
+    });
+    const up = e=>{
+      ptrs.delete(e.pointerId);
+      if(ptrs.size < 2) pinch0 = null;
+      if(ptrs.size === 0) dragStart = null;
+    };
+    cv.addEventListener('pointerup', up);
+    cv.addEventListener('pointercancel', up);
+    cv.addEventListener('pointerleave', e=>{
+      up(e);
+      if(!ptrs.size){ KHOV=-1; KYHV=-1; drawKline(); }
+    });
+    cv.style.touchAction = 'none';       // 允许自定义手势
+    cv.style.cursor = 'crosshair';
     window.addEventListener('resize', ()=>{ if(!$('p-kline').classList.contains('hide')) drawKline(); });
   }
   drawKline();
