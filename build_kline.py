@@ -179,33 +179,46 @@ def _sina_index_kline(symbol, cache_name, datalen=1023):
 
 def _east_futures_kline(secid='114.im', cache_name='im_daily.csv', lmt=1500):
     """东财期货主连日线（铁矿石主连 114.im 与新浪 i0 同源），自带当日实时 bar。
+    带 3 次重试；失败回退新浪主连日线（不含当日，但至少保证历史完整）。
     返回 date/open/high/low/close df；失败返回 None。"""
+    import urllib.request, time as _t
     fp = os.path.join(PANEL, cache_name)
-    if os.path.exists(fp):
-        d = pd.read_csv(fp, parse_dates=['date'])
-        if len(d) > 100:
-            return d.set_index('date')
-    import urllib.request
-    url = (f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}'
-           f'&klt=101&fqt=0&lmt={lmt}&end=20500101&fields1=f1,f2,f3'
-           '&fields2=f51,f52,f53,f54,f55,f56')
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0',
-                                               'Referer': 'https://quote.eastmoney.com/'})
-    try:
-        d = json.loads(urllib.request.urlopen(req, timeout=30).read())
-        kl = d.get('data', {}).get('klines') or []
-    except Exception:
-        return None
-    if not kl:
-        return None
-    rows = []
-    for line in kl:      # date,open,close,high,low,volume
-        p = line.split(',')
+    rows = None
+    for attempt in range(3):
+        url = (f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}'
+               f'&klt=101&fqt=0&lmt={lmt}&end=20500101&fields1=f1,f2,f3'
+               '&fields2=f51,f52,f53,f54,f55,f56')
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0',
+                                                   'Referer': 'https://quote.eastmoney.com/'})
         try:
-            rows.append((pd.Timestamp(p[0]), float(p[1]), float(p[3]),
-                         float(p[4]), float(p[2])))
+            d = json.loads(urllib.request.urlopen(req, timeout=30).read())
+            kl = d.get('data', {}).get('klines') or []
+            if kl:
+                tmp = []
+                for line in kl:      # date,open,close,high,low,volume
+                    p = line.split(',')
+                    try:
+                        tmp.append((pd.Timestamp(p[0]), float(p[1]), float(p[3]),
+                                    float(p[4]), float(p[2])))
+                    except Exception:
+                        continue
+                if tmp:
+                    rows = tmp
+                    break
         except Exception:
-            continue
+            pass
+        _t.sleep(2 + attempt * 2)
+    if rows is None:
+        print('  [诊断] 东财 114.im 日线 3 次重试均失败')
+    src = '东财'
+    if rows is None:
+        # 回退：新浪主连日线（历史完整，但盘中不含当日）
+        k = _sina_futures_kline('i0', '_i0_fallback.csv')
+        if k is None:
+            if os.path.exists(fp):   # 再退一步：用缓存
+                return pd.read_csv(fp, parse_dates=['date']).set_index('date')
+            return None
+        return k
     df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close'])
     df = df.sort_values('date').set_index('date').drop_duplicates()
     _today = pd.Timestamp(datetime.datetime.now(CST).date())
@@ -308,13 +321,26 @@ def _today_iv_from_dashboard():
     return out
 
 
+def _write_diag(lines):
+    """把诊断信息写入 docs/kline_diag.txt（临时排查用，会被提交到仓库）。"""
+    try:
+        fp = os.path.join(HERE, 'docs', 'kline_diag.txt')
+        with open(fp, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+    except Exception:
+        pass
+
+
 def build():
     out = {'updated': datetime.datetime.now(CST).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S'),
            'products': {}}
+    diag = [f'updated={out["updated"]}']
     today = pd.Timestamp(datetime.datetime.now(CST).date())
     # 当日实时：盘后日线缓存可能已含今日；盘中则用实时接口拼当日 bar + 看板实时 IV
     rt = _sina_realtime(list(PRODUCTS))
+    diag.append(f'新浪实时返回标的: {sorted(rt)}')
     dash_iv = _today_iv_from_dashboard()
+    diag.append(f'看板实时IV标的: {sorted(dash_iv)}')
     for name, cfg in PRODUCTS.items():
         try:
             k, iv = ohlc_of(name)
@@ -353,9 +379,12 @@ def build():
                                          live=str(k.index[-1].date()) == str(today.date()),
                                          bars=bars, pct=pcts, sig=sigs)
             tag = '（含实时当日）' if out['products'][name]['live'] else ''
+            diag.append(f'{name}: {len(bars)}根 末根={bars[-1][0]} live={out["products"][name]["live"]}')
             print(f'  [kline] {name}: {len(bars)} 根{tag}, 信号日 {sum(sigs)} 个')
         except Exception as e:
+            diag.append(f'{name}: 错误 {e}')
             print(f'  [kline错误] {name}: {e}')
+    _write_diag(diag)
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
     sz = os.path.getsize(OUT) / 1024
