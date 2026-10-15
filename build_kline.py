@@ -321,26 +321,13 @@ def _today_iv_from_dashboard():
     return out
 
 
-def _write_diag(lines):
-    """把诊断信息写入 docs/kline_diag.txt（临时排查用，会被提交到仓库）。"""
-    try:
-        fp = os.path.join(HERE, 'docs', 'kline_diag.txt')
-        with open(fp, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines) + '\n')
-    except Exception:
-        pass
-
-
 def build():
     out = {'updated': datetime.datetime.now(CST).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S'),
            'products': {}}
-    diag = [f'updated={out["updated"]}']
     today = pd.Timestamp(datetime.datetime.now(CST).date())
     # 当日实时：盘后日线缓存可能已含今日；盘中则用实时接口拼当日 bar + 看板实时 IV
     rt = _sina_realtime(list(PRODUCTS))
-    diag.append(f'新浪实时返回标的: {sorted(rt)}')
     dash_iv = _today_iv_from_dashboard()
-    diag.append(f'看板实时IV标的: {sorted(dash_iv)}')
     for name, cfg in PRODUCTS.items():
         try:
             k, iv = ohlc_of(name)
@@ -379,12 +366,9 @@ def build():
                                          live=str(k.index[-1].date()) == str(today.date()),
                                          bars=bars, pct=pcts, sig=sigs)
             tag = '（含实时当日）' if out['products'][name]['live'] else ''
-            diag.append(f'{name}: {len(bars)}根 末根={bars[-1][0]} live={out["products"][name]["live"]}')
             print(f'  [kline] {name}: {len(bars)} 根{tag}, 信号日 {sum(sigs)} 个')
         except Exception as e:
-            diag.append(f'{name}: 错误 {e}')
             print(f'  [kline错误] {name}: {e}')
-    _write_diag(diag)
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
     sz = os.path.getsize(OUT) / 1024
