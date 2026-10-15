@@ -57,7 +57,10 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python build_data.py
 
-      - name: 加密 data.json -> data.enc.txt（密码门）
+      - name: 生成K线复盘数据
+        run: python build_kline.py
+
+      - name: 加密 data.json/kline.json -> *.enc.txt（密码门）
         env:
           PAGE_PASSWORD: ${{ secrets.PAGE_PASSWORD }}
         run: python encrypt_data.py
@@ -67,7 +70,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 逐个 add：某个文件不存在时不影响其它文件入暂存区
-          for f in docs/data.enc.txt docs/history.json docs/push_state.json; do
+          for f in docs/data.enc.txt docs/kline.enc.txt docs/history.json docs/push_state.json; do
             [ -f "$f" ] && git add "$f" || true
           done
           if git diff --cached --quiet; then
