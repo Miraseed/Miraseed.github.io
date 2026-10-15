@@ -215,10 +215,11 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="kpbar">
       <select id="kProd"></select>
       <span class="kchips">
-        <span class="kchip on" data-n="60">60日</span>
+        <span class="kchip" data-n="60">60日</span>
         <span class="kchip" data-n="120">120日</span>
         <span class="kchip" data-n="250">250日</span>
-        <span class="kchip" data-n="500">全部</span>
+        <span class="kchip" data-n="500">500日</span>
+        <span class="kchip on" data-n="9999">全部</span>
       </span>
       <span class="klegend" id="kLeg"></span>
     </div>
@@ -276,7 +277,7 @@ document.querySelectorAll('.tab').forEach(t=>{
 
 /* ================= K线复盘（Canvas 手绘，风格参考同花顺期货通） ================= */
 let KL = null;            // kline.json 全量
-let KN = 60;              // 显示根数
+let KN = 9999;            // 显示根数（默认全部：2020-11-16 起）
 let KHOV = -1;            // 悬浮索引
 const KMAS = [[5,'#e8a33d'],[10,'#4a9eff'],[20,'#c77dff'],[60,'#7bd88f']];
 

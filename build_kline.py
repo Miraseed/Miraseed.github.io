@@ -20,8 +20,11 @@ K线复盘数据生成：每个标的的日K + 历史「IV 分位卖沽信号日
 - 分位 = 滚动 250 交易日（不含当日，min_periods=100）
 - 信号日 = pct ≥ pct_th 且（如配置）atm_iv ≥ iv_th —— 即当日看板会亮 ★ 的日子
 
-标的价格来源：ETF 期权面板自带标的 OHLC；铁矿石 io_iv.csv 自带 OHLC；
-中证1000 指数与创业板ETF 用腾讯行情日线（缓存到 panel/）。
+标的价格来源（统一为真实 OHLC 日线，且能取到最新交易日）：
+- ETF（上证50/沪深300/中证500/科创50/创业板）：新浪 CN_MarketDataService 日线
+- 中证1000 指数：新浪 CN_MarketDataService 日线（sh000852）
+- 铁矿石：新浪期货主连日线（i0 = 铁矿石主连）
+面板仅用于提供 IV 序列（atm_by_month / 159915_ivproxy）。
 """
 import os, json, datetime
 import numpy as np
@@ -42,18 +45,19 @@ PANEL = os.path.join(CODE, 'panel')
 OUT = os.path.join(HERE, 'docs', 'kline.json')
 CST = datetime.timezone(datetime.timedelta(hours=8))
 
-LOOKBACK, MINP, NBARS = 250, 100, 500
+LOOKBACK, MINP, NBARS = 250, 100, 1500
+START_DATE = '2020-11-16'   # 科创50ETF 上市首日，复盘起点
 
 # 与 monitor/intraday POOL 一致的阈值（复盘用当前阈值回算历史信号日）
-# prod 为 ATM 面板里的 product 键；code 为腾讯行情代码（仅在面板无价格时用）
+# prod 为 ATM 面板里的 product 键；sina 为新浪日线代码（ETF/指数）
 PRODUCTS = {
-    '科创50ETF':    dict(prod='科创50ETF',  code='sh588000', pct_th=0.65, iv_th=None),
-    '创业板ETF':    dict(prod='159915',    code='sz159915', pct_th=0.55, iv_th=None),
-    '上证50ETF':    dict(prod='上证50ETF',  code='sh510050', pct_th=0.80, iv_th=None),
-    '沪深300ETF':   dict(prod='沪深300ETF', code='sh510300', pct_th=0.75, iv_th=None),
-    '中证500ETF':   dict(prod='中证500ETF', code='sh510500', pct_th=0.85, iv_th=None),
-    '中证1000股指':  dict(prod='MO',        code='sh000852', pct_th=0.75, iv_th=0.30),
-    '铁矿石期权':    dict(prod='i',         code=None,      pct_th=0.75, iv_th=None),
+    '科创50ETF':    dict(prod='科创50ETF',  sina='sh588000', pct_th=0.65, iv_th=None),
+    '创业板ETF':    dict(prod='159915',    sina='sz159915', pct_th=0.55, iv_th=None),
+    '上证50ETF':    dict(prod='上证50ETF',  sina='sh510050', pct_th=0.80, iv_th=None),
+    '沪深300ETF':   dict(prod='沪深300ETF', sina='sh510300', pct_th=0.75, iv_th=None),
+    '中证500ETF':   dict(prod='中证500ETF', sina='sh510500', pct_th=0.85, iv_th=None),
+    '中证1000股指':  dict(prod='MO',        sina='sh000852', pct_th=0.75, iv_th=0.30),
+    '铁矿石期权':    dict(prod='i',         sina='i0',       pct_th=0.75, iv_th=None),
 }
 
 
@@ -98,38 +102,47 @@ def rolling_pct(series):
     return pd.Series(out, index=series.index)
 
 
-def _tencent_kline(code, cache_name, start='2019-01-01'):
-    """腾讯日线（指数/ETF 均可用），缓存 CSV。返回 date/open/high/low/close df。"""
+def _sina_futures_kline(symbol='i0', cache_name='i0_daily.csv'):
+    """新浪期货主连日线（真实 OHLC），gbk 编码 + JSONP 正则提取。
+    返回 date/open/high/low/close df；失败返回 None。"""
     fp = os.path.join(PANEL, cache_name)
     if os.path.exists(fp):
         d = pd.read_csv(fp, parse_dates=['date'])
         if len(d) > 100:
             return d.set_index('date')
-    import urllib.request, time as _t
-    rows = {}
-    for y in range(int(start[:4]), datetime.date.today().year + 1):
-        url = (f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?'
-               f'param={code},day,{y}-01-01,{y}-12-31,640,qfq')
-        req = urllib.request.Request(url, headers={'Referer': 'https://gu.qq.com/',
-                                                   'User-Agent': 'Mozilla/5.0'})
-        for attempt in range(3):
-            try:
-                data = json.loads(urllib.request.urlopen(req, timeout=30).read())
-                node = data.get('data', {}).get(code, {})
-                arr = node.get('qfqday') or node.get('day') or []
-                for r in arr:        # [date, open, close, high, low, vol, ...]
-                    rows[r[0]] = (float(r[1]), float(r[3]), float(r[4]), float(r[2]))
-                break
-            except Exception:
-                _t.sleep(2 + attempt * 2)
+    import urllib.request, re as _re
+    url = ('https://stock2.finance.sina.com.cn/futures/api/jsonp.php/'
+           f'var%20_i=/InnerFuturesNewService.getDailyKLine?symbol={symbol}')
+    req = urllib.request.Request(url, headers={'Referer': 'https://finance.sina.com.cn/',
+                                               'User-Agent': 'Mozilla/5.0'})
+    try:
+        raw = urllib.request.urlopen(req, timeout=30).read().decode('gbk', 'ignore')
+    except Exception:
+        return None
+    m = _re.search(r'\((\[.*\])\)', raw, _re.S)
+    if not m:
+        return None
+    try:
+        arr = json.loads(m.group(1))
+    except Exception:
+        return None
+    if not arr:
+        return None
+    rows = []
+    for r in arr:
+        try:
+            rows.append((pd.Timestamp(r['d']), float(r['o']), float(r['h']),
+                         float(r['l']), float(r['c'])))
+        except Exception:
+            continue
     if not rows:
         return None
-    df = pd.DataFrame([(pd.Timestamp(k), *v) for k, v in rows.items()],
-                      columns=['date', 'open', 'high', 'low', 'close'])
-    df = df.sort_values('date').set_index('date')
+    df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close'])
+    df = df.sort_values('date').set_index('date').drop_duplicates()
     if len(df) > 100:
         df.to_csv(fp, index_label='date')
     return df
+
 
 
 def _sina_index_kline(symbol, cache_name, datalen=1023):
@@ -160,41 +173,25 @@ def _sina_index_kline(symbol, cache_name, datalen=1023):
 
 
 def ohlc_of(name):
-    """返回 (df[date,open,high,low,close], iv_series)。"""
+    """返回 (df[date,open,high,low,close], iv_series)。
+    K 线价格统一走新浪真实 OHLC 日线；IV 序列来自面板。"""
     cfg = PRODUCTS[name]
-    prod = cfg['prod']
+    prod, sina = cfg['prod'], cfg['sina']
     if prod == '159915':
-        k = _tencent_kline('sz159915', '159915_daily_ohlc.csv', '2021-01-01')
+        k = _sina_index_kline(sina, '159915_daily_ohlc.csv', 1500)
         iv = pd.read_csv(os.path.join(PANEL, '159915_ivproxy.csv'),
                          parse_dates=['date']).set_index('date')['iv_proxy']
         return k, iv
     if prod == 'MO':
-        # 中证1000 指数真实 OHLC：新浪日线（腾讯接口对指数返回 501）；
-        # 失败时回退面板 S（仅收盘，K线呈一字，但仍可用）
-        k = _sina_index_kline('sh000852', '000852_daily.csv', 1023)
-        if k is None:
-            d = pd.read_csv(os.path.join(PANEL, 'mo_iv.csv'), parse_dates=['date'],
-                            usecols=['date', 'S'])
-            g = d.dropna().groupby('date')['S'].first()
-            k = pd.DataFrame({'close': g, 'open': g, 'high': g, 'low': g})
+        # 中证1000 指数真实 OHLC：新浪日线（腾讯接口对指数返回 501）
+        k = _sina_index_kline(sina, '000852_daily.csv', 1500)
         return k, atm_series('MO')
     if prod == 'i':
-        d = pd.read_csv(os.path.join(PANEL, 'io_iv.csv'), parse_dates=['date'])
-        k = d.groupby('date')[['open', 'high', 'low', 'close']].first().dropna()
+        # 铁矿石主连日线（i0），替代 io_iv 的期权合约价格
+        k = _sina_futures_kline('i0', 'i0_daily.csv')
         return k, atm_series('i')
-    # ETF：期权面板自带标的 OHLC（每合约重复，按日取第一行）
-    # 面板文件名用 6 位代码（配置 code 去掉交易所前缀）
-    fcode = (cfg.get('code') or '')[-6:]
-    head = pd.read_csv(os.path.join(PANEL, f'{fcode}_master.csv.gz'), nrows=1)
-    cols = [c for c in ('date', 'S', 'S_open', 'S_high', 'S_low') if c in head.columns]
-    d = pd.read_csv(os.path.join(PANEL, f'{fcode}_master.csv.gz'), usecols=cols)
-    d['date'] = pd.to_datetime(d['date'])
-    g = d.dropna(subset=['S']).groupby('date').first()
-    k = pd.DataFrame({'close': g['S']})
-    for src, dst in (('S_open', 'open'), ('S_high', 'high'), ('S_low', 'low')):
-        k[dst] = g[src] if src in g.columns else g['S']
-    for c in ('open', 'high', 'low'):
-        k[c] = k[c].fillna(k['close'])
+    # ETF：新浪日线真实 OHLC
+    k = _sina_index_kline(sina, f'{sina}_daily.csv', 1500)
     return k, atm_series(prod)
 
 
@@ -212,7 +209,8 @@ def build():
             sig = ((pct >= cfg['pct_th'])
                    & (True if cfg['iv_th'] is None else (iv >= cfg['iv_th'])))
             sig = sig.where(pct.notna(), False)
-            k = k.tail(NBARS)
+            # 复盘起点锚定 2020-11-16（科创50ETF 上市首日），且不超过 NBARS
+            k = k[k.index >= pd.Timestamp(START_DATE)].tail(NBARS)
             bars, pcts, sigs = [], [], []
             for day, r in k.iterrows():
                 p = pct.get(day)
