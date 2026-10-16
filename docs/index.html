@@ -113,6 +113,9 @@ td{padding:9px 11px;border-bottom:1px solid var(--line2);
   font-variant-numeric:tabular-nums;color:var(--fg2)}
 tr:last-child td{border-bottom:none}
 tbody tr:nth-child(even){background:#fcfcfd}
+th.sortable{cursor:pointer;user-select:none;-webkit-user-select:none}
+th.sortable:hover{color:var(--blue)}
+th.sortable.on{color:var(--blue);font-weight:700}
 td.num{text-align:right}
 td.ts{color:var(--fg3);font-size:11.5px;white-space:nowrap}
 .tag{font-size:10px;padding:1px 6px;border-radius:4px;margin-left:5px}
@@ -242,8 +245,11 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   <section id="p-hist" class="hide">
     <div class="tblwrap">
       <table>
-        <thead><tr><th>触发时间</th><th>标的</th><th style="text-align:right">ATM IV</th>
-          <th style="text-align:right">IV分位</th><th>建议合约</th><th>触发原因</th></tr></thead>
+        <thead><tr>
+          <th class="sortable" data-k="ts">触发时间</th><th class="sortable" data-k="name">标的</th>
+          <th class="sortable num" data-k="iv" style="text-align:right">ATM IV</th>
+          <th class="sortable num" data-k="pct" style="text-align:right">IV分位</th>
+          <th>建议合约</th><th>触发原因</th></tr></thead>
         <tbody id="histBody"></tbody>
       </table>
     </div>
@@ -710,7 +716,30 @@ function render(s){
   </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
 
   const hist = s.history||[];
-  $('histBody').innerHTML = hist.length ? hist.map(h=>`<tr>
+  renderHist(hist);
+
+  $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+}
+
+/* ---------- 历史信号排序：默认触发时间降序，前四列点击切换 ---------- */
+let HIST_DATA = [];                      // 最近一次的历史数据
+let HIST_SORT = {key:'ts', dir:-1};      // ts/name/iv/pct；dir -1=降序 1=升序
+const HKEY = {ts:'时间戳', name:'标的', iv:'ATM_IV', pct:'IV分位'};
+
+function histVal(h, key){
+  if(key==='ts')  return h['时间戳']||h['日期']||'';
+  if(key==='name')return h['标的']||'';
+  const v = parseFloat(h[HKEY[key]]);
+  return isNaN(v) ? -Infinity : v;
+}
+function renderHist(hist){
+  HIST_DATA = hist||[];
+  const {key, dir} = HIST_SORT;
+  const rows = [...HIST_DATA].sort((a,b)=>{
+    const va = histVal(a,key), vb = histVal(b,key);
+    return (va<vb?-1:va>vb?1:0)*dir;
+  });
+  $('histBody').innerHTML = rows.length ? rows.map(h=>`<tr>
     <td class="ts">${esc(h['时间戳']||h['日期']||'')}</td>
     <td>${esc(h['标的']||'')}</td>
     <td class="num">${pct(h['ATM_IV'])}</td>
@@ -718,9 +747,25 @@ function render(s){
     <td>${esc(h['建议合约']||'—')}</td>
     <td>${esc(h['触发原因']||'—')}</td>
   </tr>`).join('') : '<tr><td colspan="6" class="empty">暂无历史触发记录</td></tr>';
-
-  $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+  // 表头箭头
+  document.querySelectorAll('#p-hist th.sortable').forEach(th=>{
+    const k = th.dataset.k;
+    th.innerHTML = th.textContent.replace(/[▲▼]\s*$/,'').trim()
+      + (k===key ? (dir<0?' ▼':' ▲') : '');
+    th.classList.toggle('on', k===key);
+  });
 }
+function initHistSort(){
+  document.querySelectorAll('#p-hist th.sortable').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const k = th.dataset.k;
+      if(HIST_SORT.key===k) HIST_SORT.dir *= -1;      // 同列再点反向
+      else HIST_SORT = {key:k, dir: k==='name' ? 1 : -1};  // 新列：文本升序，数值/时间降序
+      renderHist(HIST_DATA);
+    });
+  });
+}
+initHistSort();   // 表头为静态 HTML，脚本末尾绑定一次即可
 
 /* ---------- 密码门解密（AES-GCM + PBKDF2）：正确密码才解锁 ---------- */
 async function decryptBlob(pwd, blob){
@@ -773,6 +818,7 @@ async function tryGate(){
     $('gate').classList.add('hide');
     FAILS=0; render(s);
     if(!KL) loadKline();
+    startPolling();   // 首次登录也要启动定时轮询（幂等：先清旧计时器）
     $('gErr').textContent='';
   }catch(e){
     PWD = old;
@@ -784,6 +830,7 @@ $('gGo').onclick = tryGate;
 $('gPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') tryGate(); });
 
 function startPolling(){
+  if(TIMER) clearInterval(TIMER);      // 幂等：防止重复启动
   pull();
   if(!KL) loadKline();
   TIMER = setInterval(pull, 120000);   // 每2分钟拉一次最新数据
