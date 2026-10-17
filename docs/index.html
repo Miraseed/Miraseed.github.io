@@ -91,10 +91,14 @@ header{
 .kv .v{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--fg)}
 .v.up{color:var(--red)} .v.down{color:var(--green)}
 
-/* IV 分位条 */
-.bar{height:4px;background:var(--line2);border-radius:3px;overflow:hidden;margin-top:5px}
+/* IV 分位条（b = 阈值刻度线） */
+.bar{position:relative;height:4px;background:var(--line2);border-radius:3px;overflow:visible;margin-top:5px}
 .bar i{display:block;height:100%;border-radius:3px;background:var(--blue);transition:width .5s}
 .bar i.hot{background:var(--red)} .bar i.quiet{background:var(--green)}
+.bar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--fg);opacity:.5;border-radius:1px}
+.gap{font-size:10px;margin-top:4px;color:var(--fg3);font-variant-numeric:tabular-nums}
+.gap.hot{color:var(--red);font-weight:700}
+.gap.near{color:var(--amber);font-weight:600}
 
 .row{display:flex;gap:8px;font-size:12px;padding:5px 0;border-top:1px solid var(--line2)}
 .row .rk{color:var(--fg3);flex:none;min-width:58px}
@@ -707,6 +711,20 @@ function card(r){
   const qcls = (q!==null&&q>=0.75) ? 'hot' : (q!==null&&q<=0.35 ? 'quiet' : '');
   const w = (q!==null&&q!==undefined) ? Math.round(q*100) : 0;
 
+  // ---- 触发阈值（大字格，替代期限结构）----
+  // 阈值来自后端行字段；老数据兜底用本地表
+  const TH_FALLBACK = {'科创50ETF':0.65,'创业板ETF':0.55,'上证50ETF':0.80,
+                       '沪深300ETF':0.75,'中证500ETF':0.85,'中证1000股指':0.75,'铁矿石期权':0.75};
+  const th = _okNum(r['阈值']) ?? TH_FALLBACK[r['标的']] ?? null;
+  const gapPt = (q!==null&&q!==undefined&&th!==null) ? Math.round((q-th)*100) : null;
+  let gapHtml='';
+  if(gapPt!==null){
+    if(gapPt>=0)      gapHtml=`<div class="gap hot">已超 +${gapPt}pt</div>`;
+    else if(gapPt>=-5)gapHtml=`<div class="gap near">临界，差 ${-gapPt}pt</div>`;
+    else              gapHtml=`<div class="gap">差 ${-gapPt}pt</div>`;
+  }
+  const thMark = (th!==null&&th>0&&th<1) ? `<b style="left:${Math.round(th*100)}%"></b>` : '';
+
   const ts = r['期限结构'];
   let tsHtml='—';
   if(ts!==null&&ts!==undefined&&!isNaN(ts)){
@@ -720,21 +738,39 @@ function card(r){
     <div class="kv">
       <div><div class="k">ATM IV</div><div class="v">${pct(r['ATM_IV'])}</div></div>
       <div><div class="k">IV 分位</div><div class="v ${qcls==='hot'?'up':''}">${q===null||q===undefined?'—':Math.round(q*100)+'%'}
-        <div class="bar"><i class="${qcls}" style="width:${w}%"></i></div></div></div>
-      <div><div class="k">期限结构</div><div class="v">${tsHtml}</div></div>
+        <div class="bar"><i class="${qcls}" style="width:${w}%"></i>${thMark}</div></div></div>
+      <div><div class="k">触发阈值</div><div class="v">${th!==null?Math.round(th*100)+'%':'—'}</div>${gapHtml}</div>
     </div>`;
 
   const rows = [];
   if(r['建议合约'] && r['建议合约']!=='—')
-    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv">${esc(r['建议合约'])}　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
-  if(r['结构提示'] && r['结构提示']!=='—')
-    rows.push(`<div class="row"><span class="rk">数据来源</span><span class="rv">${esc(r['结构提示'])}</span></div>`);
-  if(r['触发原因'] && r['触发原因']!=='—')
-    rows.push(`<div class="row"><span class="rk">触发原因</span><span class="rv">${esc(r['触发原因'])}</span></div>`);
+    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv"><b>${esc(r['建议合约'])}</b>　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+  // 期限结构降级为小字行（重要度低于阈值，不放主格）
+  if(ts!==null&&ts!==undefined&&!isNaN(ts)){
+    const nv = r['近月IV'], xv = r['次近月IV'];
+    const det = (nv!=null&&xv!=null) ? `（近${(nv*100).toFixed(1)} / 次${(xv*100).toFixed(1)}）` : '';
+    rows.push(`<div class="row"><span class="rk">期限结构</span><span class="rv" style="color:var(--fg3)">${tsHtml} ${det}</span></div>`);
+  }
+  // 双重条件标的：分位够但 IV 不够时单独提示（否则用户会困惑"为什么没触发"）
+  const ivTh = _okNum(r['阈值IV']);
+  const iv = _okNum(r['ATM_IV']);
+  if(ivTh!==null && iv!==null && gapPt!==null && gapPt>=0 && iv<ivTh)
+    rows.push(`<div class="row"><span class="rk">双条件</span><span class="rv" style="color:var(--amber)">分位已达标，ATM IV 还差 ${((ivTh-iv)*100).toFixed(1)}pt（需≥${Math.round(ivTh*100)}%）</span></div>`);
+  // 铁矿石等"仅观察"品种的特殊说明必须保留，避免误当成可操作信号
+  if(String(r['信号']).includes('仅观察') && r['建议策略'])
+    rows.push(`<div class="row"><span class="rk">说明</span><span class="rv" style="color:var(--fg3)">${esc(r['建议策略'])}</span></div>`);
   if(r['行情时间戳'])
     rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${esc(r['行情时间戳'])}</span></div>`);
 
-  const strat = r['建议策略'] ? `<div class="strat">${esc(r['建议策略'])}</div>` : '';
+  // 策略块：信号卡压缩成纪律短语（长句每次都一样，不再占版面）；
+  // 异常/缺失卡保留原始说明（有诊断价值）
+  let strat = '';
+  const sigTxt = String(r['信号']||'');
+  if(sigTxt.includes('★')){
+    strat = `<div class="strat">卖出虚值认沽 · 权利金 <b>+50% 止盈 / −50% 止损</b> · 剩余≤7天移仓 · 保证金≤账户50%</div>`;
+  }else if(sigTxt.includes('数据缺失') || sigTxt.includes('异常') || sigTxt==='—'){
+    strat = r['建议策略'] ? `<div class="strat">${esc(r['建议策略'])}</div>` : '';
+  } /* 观望：策略长句与阈值格重复，删除 */
 
   return `<div class="${cls}">
     <div class="c-top">
