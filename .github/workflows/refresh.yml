@@ -35,7 +35,10 @@ jobs:
         run: |
           git clone --depth 1 "https://x-access-token:${GH_PAT}@github.com/Miraseed/etf-option-monitor.git" /tmp/mainrepo
           cp -r /tmp/mainrepo/code ./code
-          # 推送模块也在主仓库维护，必须一并同步（否则推送逻辑改动不生效）
+          # 推送模块只在主仓库维护。这里必须直接放到仓库根目录，
+          # 因为 build_data.py 的候选路径里含有 `HERE/web/push.py`——
+          # 若把 web/ 目录也复制进来，会命中一份永远不会更新的旧副本，
+          # 导致推送逻辑改动不生效。
           mkdir -p ./web
           cp /tmp/mainrepo/web/push.py ./web/push.py
           cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
