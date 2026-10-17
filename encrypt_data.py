@@ -13,9 +13,10 @@ import hashlib
 import sys
 
 HERE = os.getcwd()   # 以运行目录为准（docs/*.json 相对当前目录）
-# 需要加密的文件：data.json（看板）与 kline.json（K线复盘）
+# 需要加密的文件：data.json（看板）、kline.json（K线基线）、kline_tail.json（K线实时尾段）
 TARGETS = [('docs/data.json', 'docs/data.enc.txt'),
-           ('docs/kline.json', 'docs/kline.enc.txt')]
+           ('docs/kline.json', 'docs/kline.enc.txt'),
+           ('docs/kline_tail.json', 'docs/kline_tail.enc.txt')]
 
 
 def encrypt_bytes(key: bytes, plaintext: bytes):

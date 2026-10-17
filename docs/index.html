@@ -612,14 +612,72 @@ function initKline(){
   }
   drawKline();
 }
+/* ---- K线数据加载：base(历史基线,可304缓存) + tail(实时尾段) 并行，失败自动重试 ---- */
+function kUnpack(p){                      // v2 紧凑格式 -> 运行时格式（兼容旧 v1）
+  if(p.bars) return p;
+  const days=[]; let cur=new Date(p.d0+'T00:00:00');
+  for(let i=0;i<p.dd.length;i++){
+    if(i>0) cur=new Date(cur.getTime()+p.dd[i]*86400000);
+    days.push(cur);
+  }
+  const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return {th:p.th, iv_th:p.iv_th, iv_from:p.iv_from, live:p.live,
+          bars:days.map((d,i)=>[fmt(d), p.o[i], p.h[i], p.l[i], p.c[i]]),
+          pct:p.p.map(v=>v<0?null:v/100),
+          sig:[...p.s].map(Number)};
+}
+function kDecrypted(json){                // v2 -> 运行时格式
+  const out={updated:json.updated, products:{}};
+  for(const [k,p] of Object.entries(json.products||{})) out.products[k]=kUnpack(p);
+  return out;
+}
+function kMerge(base, tail){              // tail 覆盖 base 末尾
+  if(!tail || !tail.products) return base;
+  const out={updated:(tail.updated||base.updated), products:{}};
+  for(const [k,b] of Object.entries(base.products)){
+    const t=tail.products[k];
+    if(!t){ out.products[k]=b; continue; }
+    const n=t.bars.length, bn=b.bars.length, cut=Math.max(0, bn-n);
+    const m={...b, bars:b.bars.slice(0,cut).concat(t.bars),
+             pct:b.pct.slice(0,cut).concat(t.pct), sig:b.sig.slice(0,cut).concat(t.sig)};
+    out.products[k]=m;
+  }
+  return out;
+}
+async function fetchJson(url, bust){
+  const r = await fetch(url+(bust?'?t='+Date.now():''), {cache: bust?'no-store':'default'});
+  if(!r.ok) throw new Error('http '+r.status);
+  return await r.json();
+}
+let KRETRY = 0, KLOADING = false;
 async function loadKline(){
+  if(!PWD || KLOADING) return;
+  KLOADING = true;
   try{
-    const r = await fetch('kline.enc.txt?t='+Date.now(),{cache:'no-store'});
-    if(!r.ok) return;
-    const blob = await r.json();
-    KL = await decryptBlob(PWD, blob);
+    if(!$('p-kline').classList.contains('hide')) $('kTip').textContent = 'K线数据加载中…';
+    // base 可走 HTTP 缓存(304)；tail 每次最新。并行请求。
+    const results = await Promise.allSettled([
+      fetchJson('kline.enc.txt', false), fetchJson('kline_tail.enc.txt', true)]);
+    const rb = results[0], rt = results[1];
+    if(rb.status!=='fulfilled') throw rb.reason;
+    let KLraw = kDecrypted(await decryptBlob(PWD, rb.value));
+    if(rt.status==='fulfilled'){
+      try{ KLraw = kMerge(KLraw, kDecrypted(await decryptBlob(PWD, rt.value))); }
+      catch(e){ /* 尾段失败不影响基线 */ }
+    }
+    KL = KLraw; KRETRY = 0;
     initKline();
-  }catch(e){ /* 缺 K线数据不影响主看板 */ }
+  }catch(e){
+    if(++KRETRY <= 5){
+      setTimeout(loadKline, 5000*KRETRY);   // 5s/10s/15s… 递增重试
+      if(!$('p-kline').classList.contains('hide'))
+        $('kTip').textContent = 'K线加载失败，'+(5*KRETRY)+'秒后自动重试('+KRETRY+'/5)…';
+    }else{
+      $('kTip').textContent = 'K线数据加载失败，请刷新页面重试';
+    }
+  }finally{
+    KLOADING = false;
+  }
 }
 
 function card(r){
@@ -831,6 +889,7 @@ $('gPwd').addEventListener('keydown', e=>{ if(e.key==='Enter') tryGate(); });
 
 function startPolling(){
   if(TIMER) clearInterval(TIMER);      // 幂等：防止重复启动
+  loadKline();                          // K线数据与看板并行加载（不阻塞看板）
   pull();
   if(!KL) loadKline();
   TIMER = setInterval(pull, 120000);   // 每2分钟拉一次最新数据

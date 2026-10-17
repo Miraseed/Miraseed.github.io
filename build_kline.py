@@ -43,6 +43,8 @@ if CODE is None:
     CODE = os.path.join(os.path.dirname(HERE), 'code')
 PANEL = os.path.join(CODE, 'panel')
 OUT = os.path.join(HERE, 'docs', 'kline.json')
+OUT_TAIL = os.path.join(HERE, 'docs', 'kline_tail.json')
+TAILN = 8          # 尾段根数（实时刷新用，前端 base+tail 合并）
 CST = datetime.timezone(datetime.timedelta(hours=8))
 
 LOOKBACK, MINP, NBARS = 250, 100, 1500
@@ -369,10 +371,41 @@ def build():
             print(f'  [kline] {name}: {len(bars)} 根{tag}, 信号日 {sum(sigs)} 个')
         except Exception as e:
             print(f'  [kline错误] {name}: {e}')
+    # 紧凑列式编码：日期差分 + 分位整数化 + 信号位图（体积约降 50%，手机加载更快）
+    out['v'] = 2
+    for name, p in out['products'].items():
+        days = [pd.Timestamp(b[0]) for b in p['bars']]
+        p['d0'] = p['bars'][0][0]
+        p['dd'] = [1] + [int((days[i] - days[i-1]).days) for i in range(1, len(days))]
+        p['o'] = [b[1] for b in p['bars']]
+        p['h'] = [b[2] for b in p['bars']]
+        p['l'] = [b[3] for b in p['bars']]
+        p['c'] = [b[4] for b in p['bars']]
+        p['p'] = [-1 if v is None else round(v*100) for v in p['pct']]
+        p['s'] = ''.join(str(v) for v in p['sig'])
+        del p['bars'], p['pct'], p['sig']
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
     sz = os.path.getsize(OUT) / 1024
-    print(f'kline.json: {len(out["products"])} 标的, {sz:.0f}KB')
+    # 尾段文件：最近 TAILN 根（含实时当日），前端每次轻量拉取
+    tail = {'updated': out['updated'], 'v': 2, 'n': TAILN, 'products': {}}
+    for name, p in out['products'].items():
+        N = len(p['c'])
+        m = min(TAILN, N)
+        # d0 必须是尾段第一根的日期：d0 + 前段差分之和（dd[i] 为第 i 根与前一根的日历日差）
+        first_day = pd.Timestamp(p['d0']) + pd.Timedelta(days=sum(p['dd'][1:N-m+1]))
+        tail['products'][name] = {
+            'th': p['th'], 'iv_th': p['iv_th'], 'iv_from': p['iv_from'],
+            'live': p['live'],
+            'd0': str(first_day.date()),
+            'dd': p['dd'][-m:],
+            'o': p['o'][-m:], 'h': p['h'][-m:], 'l': p['l'][-m:], 'c': p['c'][-m:],
+            'p': p['p'][-m:], 's': p['s'][-m:],
+        }
+    with open(OUT_TAIL, 'w', encoding='utf-8') as f:
+        json.dump(tail, f, ensure_ascii=False, separators=(',', ':'))
+    szt = os.path.getsize(OUT_TAIL) / 1024
+    print(f'kline.json: {len(out["products"])} 标的, {sz:.0f}KB + 尾段 {szt:.1f}KB')
 
 
 if __name__ == '__main__':
