@@ -154,6 +154,21 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   .grid{grid-template-columns:1fr}
   .c-px{font-size:15px}
 }
+/* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图 */
+@media(max-height:500px) and (orientation:landscape){
+  .hd{padding:6px 0}
+  .hd h1{font-size:14px}
+  .stats{margin:8px 0 2px}
+  .stats .stat{padding:6px}
+  .stats .v{font-size:15px}
+  .tabs{margin:8px 0 6px}
+  .tab{padding:5px 12px;font-size:12px}
+  .kpbar{margin-bottom:6px;gap:8px}
+  .kpbar select{padding:4px 8px;font-size:12px}
+  .kchip{padding:3px 9px;font-size:11px}
+  .ktip{padding:3px 4px 1px;font-size:11px}
+  .kmeta{margin-top:6px}
+}
 /* ---------- K线复盘 ---------- */
 .kpbar{display:flex;align-items:center;gap:10px;margin:0 0 8px;flex-wrap:wrap}
 .kpbar select{background:var(--card);color:var(--fg);border:1px solid var(--line);
@@ -325,12 +340,15 @@ function drawKline(){
   const vh = window.innerHeight||800;
   // 取整避免小数的子像素误差导致右侧出现 1px 滚动条
   const W = Math.max(240, Math.floor(Math.min(cv.parentElement.clientWidth, vw) - 12));
-  // 横向（宽 > 高）：宽屏时不该再按 0.72 拉高，否则一个 K 线图要滚动两屏；
-  // 让高度吃满「视口高 - 顶部栏/页签/提示条」剩余空间，K 线才够舒展。
+  // 高度按「视口方向」分两套：
+  //  · 横屏（宽 > 高）：屏幕矮，若按宽度的 0.62 倍算，一屏放不下、要上下滚两屏才能看全。
+  //    改为吃满「视口高 − 顶栏/页签/提示条占用」的剩余空间（实测固定占用约 110px），
+  //    下限 200 保证 K 线主体与 IV 副图都还看得清。
+  //  · 竖屏：沿用 0.72 比例，上限 460，且不超过视口高 − 180。
   const landscape = vw > vh;
   const H = landscape
-    ? Math.max(220, Math.min(vh - 150, Math.round(W*0.62)))
-    : Math.max(220, Math.min(460, Math.round(W*0.72), vh - 180));
+    ? Math.max(200, Math.min(Math.round(W*0.62), vh - 110))
+    : Math.max(240, Math.min(460, Math.round(W*0.78), vh - 160));
   const PADL=52, PADR=10, PADT=10;
   const volH = 52;                      // IV分位副图高
   const gap = 16;
