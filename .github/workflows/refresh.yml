@@ -39,7 +39,7 @@ jobs:
           mkdir -p ./web
           cp /tmp/mainrepo/web/push.py ./web/push.py
           cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
-          # 清理可能的旧副本，避免 import push 命中错误版本
+          cp /tmp/mainrepo/web/github_action/build_kline.py ./build_kline.py
           rm -f ./code/push.py
           echo "主仓库已就绪"
 
