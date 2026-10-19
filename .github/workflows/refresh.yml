@@ -35,15 +35,6 @@ jobs:
         run: |
           git clone --depth 1 "https://x-access-token:${GH_PAT}@github.com/Miraseed/etf-option-monitor.git" /tmp/mainrepo
           cp -r /tmp/mainrepo/code ./code
-          # 推送模块只在主仓库维护。这里必须直接放到仓库根目录，
-          # 因为 build_data.py 的候选路径里含有 `HERE/web/push.py`——
-          # 若把 web/ 目录也复制进来，会命中一份永远不会更新的旧副本，
-          # 导致推送逻辑改动不生效。
-          mkdir -p ./web
-          cp /tmp/mainrepo/web/push.py ./web/push.py
-          cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
-          # 清理可能的旧副本，避免 import push 命中错误版本
-          rm -f ./code/push.py
           echo "主仓库已就绪"
 
       - uses: actions/setup-python@v5
@@ -60,10 +51,7 @@ jobs:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python build_data.py
 
-      - name: 生成K线复盘数据
-        run: python build_kline.py
-
-      - name: 加密 data.json/kline.json -> *.enc.txt（密码门）
+      - name: 加密 data.json -> data.enc.txt（密码门）
         env:
           PAGE_PASSWORD: ${{ secrets.PAGE_PASSWORD }}
         run: python encrypt_data.py
@@ -103,7 +91,13 @@ jobs:
           H10=$((10#$H))
           IN_AM=$([ $H10 -ge $((10#0128)) ] && [ $H10 -le $((10#0332)) ] && echo 1 || echo 0)
           IN_PM=$([ $H10 -ge $((10#0458)) ] && [ $H10 -le $((10#0702)) ] && echo 1 || echo 0)
-          if [ "$DOW" -le 5 ] && { [ "$IN_AM" = 1 ] || [ "$IN_PM" = 1 ]; }; then
+          # 午休（北京 11:33-12:57）：保持续跑但拉长间隔。
+          # 目的：链永不断——旧逻辑午休后只能靠 GitHub cron 恢复，而 cron
+          # 高负载会降频跳过（2026-10-19 实测下午开盘 40 分钟没触发，
+          # 数据卡在午休最后一轮）。公开仓库 Actions 免费无额度压力。
+          IN_BREAK=$([ $H10 -ge $((10#0333)) ] && [ $H10 -le $((10#0457)) ] && echo 1 || echo 0)
+          if [ "$DOW" -le 5 ] && { [ "$IN_AM" = 1 ] || [ "$IN_PM" = 1 ] || [ "$IN_BREAK" = 1 ]; }; then
+            if [ "$IN_BREAK" = 1 ]; then sleep 240; fi   # 午休：约 5 分钟一轮，只保链不断
             sleep 60
             for i in 1 2 3; do
               curl -s -X POST -H "Authorization: token $GH_TOKEN" \
