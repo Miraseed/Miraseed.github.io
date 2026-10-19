@@ -42,7 +42,9 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone --depth 1 "https://x-access-token:${GH_PAT}@github.com/Miraseed/etf-option-monitor.git" /tmp/mainrepo
+          # 必须显式指定 master：该仓库默认分支是 main，且 main 落后 master 若干提交
+          # （main 上的 push.py 还停在"彩色进度条"之前的版本），不指定会静默跑到旧代码
+          git clone --depth 1 -b master "https://x-access-token:${GH_PAT}@github.com/Miraseed/etf-option-monitor.git" /tmp/mainrepo
           cp -r /tmp/mainrepo/code ./code
           # 推送模块只在主仓库维护，必须一并同步（否则 build_data 报"未找到 web/push.py"）
           mkdir -p ./web
