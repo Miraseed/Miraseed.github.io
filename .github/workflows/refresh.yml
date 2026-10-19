@@ -46,7 +46,15 @@ jobs:
           cp -r /tmp/mainrepo/code ./code
           # 推送模块只在主仓库维护，必须一并同步（否则 build_data 报"未找到 web/push.py"）
           mkdir -p ./web
-          cp /tmp/mainrepo/web/push.py ./web/push.py
+          cp -f /tmp/mainrepo/web/push.py ./web/push.py
+          # 自检：push.py 必须是主仓库最新版（曾经因为 clone/缓存拿到旧副本，
+          # 表面上 workflow 正确、实际跑的是没有新逻辑的旧文件）
+          echo "push.py sha1: $(sha1sum ./web/push.py | cut -c1-12)"
+          if grep -q "def is_test" ./web/push.py; then
+            echo "push.py 含测试模式"
+          else
+            echo "WARNING: push.py 是旧版（缺测试模式），检查主仓库 master 是否已推送"
+          fi
           cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
           cp /tmp/mainrepo/web/github_action/build_kline.py ./build_kline.py
           rm -f ./code/push.py
