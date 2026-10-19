@@ -321,8 +321,16 @@ function drawKline(){
   // 高度：竖屏按宽度的 0.72 倍；横屏视口矮，用 (视口高 - 页面其它元素) 兜底，
   // 避免画布高出屏幕、底部日期被浏览器工具栏挡住。
   const dpr = window.devicePixelRatio||1;
-  const W = Math.max(240, Math.min(cv.parentElement.clientWidth, document.documentElement.clientWidth) - 12);
-  const H = Math.max(240, Math.min(460, W*0.72, (window.innerHeight||800) - 180));
+  const vw = document.documentElement.clientWidth;
+  const vh = window.innerHeight||800;
+  // 取整避免小数的子像素误差导致右侧出现 1px 滚动条
+  const W = Math.max(240, Math.floor(Math.min(cv.parentElement.clientWidth, vw) - 12));
+  // 横向（宽 > 高）：宽屏时不该再按 0.72 拉高，否则一个 K 线图要滚动两屏；
+  // 让高度吃满「视口高 - 顶部栏/页签/提示条」剩余空间，K 线才够舒展。
+  const landscape = vw > vh;
+  const H = landscape
+    ? Math.max(220, Math.min(vh - 150, Math.round(W*0.62)))
+    : Math.max(220, Math.min(460, Math.round(W*0.72), vh - 180));
   const PADL=52, PADR=10, PADT=10;
   const volH = 52;                      // IV分位副图高
   const gap = 16;
