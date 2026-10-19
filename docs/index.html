@@ -154,23 +154,6 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   .grid{grid-template-columns:1fr}
   .c-px{font-size:15px}
 }
-/* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图。
-   阈值 620px：实测部分手机横屏视口高约 490-500（浏览器 UI 占掉一部分），
-   旧的 500 阈值恰好不命中导致整套横屏适配失效 */
-@media(max-height:620px) and (orientation:landscape){
-  header{display:none}          /* 顶栏横屏整体收起（数据时间在下方 meta 表仍有） */
-  .tabs{margin:8px 0 6px}
-  .tab{padding:5px 12px;font-size:12px}
-  /* 标的/周期/图例强制同一行：禁换行+整体缩小，图例跟在"全部"后面 */
-  .kpbar{flex-wrap:nowrap;margin-bottom:6px;gap:8px;white-space:nowrap;overflow:hidden}
-  .kpbar select{padding:4px 8px;font-size:12px;flex:none;min-width:104px;max-width:150px}
-  .kchips{flex:none;gap:5px}
-  .kchip{padding:3px 9px;font-size:11px}
-  .klegend{flex:none;font-size:10px;gap:7px;margin-left:auto}
-  .klegend s{width:7px;height:7px}
-  .ktip{padding:3px 4px 1px;font-size:11px}
-  .kmeta{margin-top:6px}
-}
 /* ---------- K线复盘 ---------- */
 .kpbar{display:flex;align-items:center;gap:10px;margin:0 0 8px;flex-wrap:wrap}
 .kpbar select{background:var(--card);color:var(--fg);border:1px solid var(--line);
@@ -186,6 +169,26 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 .kchart{position:relative;background:var(--card);border:1px solid var(--line);
   border-radius:10px;padding:6px;overflow:hidden}
 .kchart canvas{display:block;width:100%;height:auto}
+/* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图。
+   阈值 620px：实测部分手机横屏视口高约 490-500（浏览器 UI 占掉一部分），
+   旧的 500 阈值恰好不命中导致整套横屏适配失效 */
+@media(max-height:620px) and (orientation:landscape){
+  header{display:none}          /* 顶栏横屏整体收起（数据时间在下方 meta 表仍有） */
+  .tabs{margin:8px 0 6px}
+  .tab{padding:5px 12px;font-size:12px}
+  /* 标的/周期/图例强制同一行：禁换行+整体缩小，图例跟在"全部"后面 */
+  .kpbar{flex-wrap:nowrap;margin-bottom:6px;gap:6px;white-space:nowrap;overflow:hidden}
+  .kpbar select{padding:4px 6px;font-size:12px;flex:none;min-width:96px;max-width:132px}
+  .kchips{flex:none;gap:4px}
+  .kchip{padding:3px 7px;font-size:11px;border-radius:6px}
+  /* 图例：宽屏与周期同行；窄屏空间不够时整块换行并右对齐（不拆散成两截） */
+  .klegend{flex:0 1 auto;font-size:10px;gap:6px;margin-left:auto;flex-wrap:nowrap;overflow:hidden}
+  .klegend i{white-space:nowrap}
+  .klegend s{width:6px;height:6px}
+  .ktip{padding:3px 4px 1px;font-size:11px}
+  .kmeta{margin-top:6px}
+}
+
 .ktip{font-size:12px;color:var(--fg2);font-variant-numeric:tabular-nums;
   padding:6px 4px 2px;min-height:18px;line-height:1.6}
 .kmeta{margin-top:8px}
