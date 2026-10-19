@@ -154,8 +154,10 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   .grid{grid-template-columns:1fr}
   .c-px{font-size:15px}
 }
-/* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图 */
-@media(max-height:500px) and (orientation:landscape){
+/* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图。
+   阈值 620px：实测部分手机横屏视口高约 490-500（浏览器 UI 占掉一部分），
+   旧的 500 阈值恰好不命中导致整套横屏适配失效 */
+@media(max-height:620px) and (orientation:landscape){
   header{display:none}          /* 顶栏横屏整体收起（数据时间在下方 meta 表仍有） */
   .tabs{margin:8px 0 6px}
   .tab{padding:5px 12px;font-size:12px}
