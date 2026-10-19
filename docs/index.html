@@ -316,9 +316,13 @@ function drawKline(){
   const mas = KMAS.map(([m,c])=>({m,c,arr:bars.map((_,i)=>maAt(closes,i,m))})).filter(x=>x.arr.some(v=>v!=null));
 
   // 尺寸（DPR 适配，保证清晰）
+  // 宽度：取父容器与文档视口的较小者，防止横屏切换瞬间布局未稳定时
+  // canvas 撑破容器（旧逻辑只看父容器，一旦被撑大就永远缩不回来）。
+  // 高度：竖屏按宽度的 0.72 倍；横屏视口矮，用 (视口高 - 页面其它元素) 兜底，
+  // 避免画布高出屏幕、底部日期被浏览器工具栏挡住。
   const dpr = window.devicePixelRatio||1;
-  const W = cv.parentElement.clientWidth - 12;
-  const H = Math.max(340, Math.min(460, W*0.72));
+  const W = Math.max(240, Math.min(cv.parentElement.clientWidth, document.documentElement.clientWidth) - 12);
+  const H = Math.max(240, Math.min(460, W*0.72, (window.innerHeight||800) - 180));
   const PADL=52, PADR=10, PADT=10;
   const volH = 52;                      // IV分位副图高
   const gap = 16;
@@ -613,6 +617,12 @@ function initKline(){
       c.onclick = e=>{ _resetCross(); old(e); };
     });
     window.addEventListener('resize', ()=>{ if(!$('p-kline').classList.contains('hide')) drawKline(); });
+    // 手机横竖屏切换：rotation 后布局有延迟，resize 可能先于布局完成触发，
+    // 这里在 orientationchange 后再补画两次，确保画布尺寸跟随新方向
+    window.addEventListener('orientationchange', ()=>{
+      if($('p-kline').classList.contains('hide')) return;
+      setTimeout(drawKline, 150); setTimeout(drawKline, 500);
+    });
   }
   drawKline();
 }
