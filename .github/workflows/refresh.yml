@@ -5,6 +5,14 @@ name: 刷新期权信号
 #   09:30-11:30 → UTC 01:30-03:30；13:00-15:00 → UTC 05:00-07:00
 # 说明：全部 7 个标的走新浪实时链（秒级，BS 反解 IV），全量约 3 秒。
 on:
+  # 手动触发：勾选「测试推送」后，本轮不发真实消息，只把卡片打印到日志
+  # （同时绕过"当日只推一次"的去重），便于改完排版立刻看效果。
+  workflow_dispatch:
+    inputs:
+      test_push:
+        description: '测试模式：卡片只打到日志，不真发企微，且不受每日一次限制'
+        type: boolean
+        default: false
   schedule:
     # 上午盘：每3分钟
     - cron: '*/3 1-3 * * 1-5'
@@ -12,7 +20,6 @@ on:
     - cron: '*/3 5-7 * * 1-5'
     # 开盘前/午间/收盘后：每30分钟兜底
     - cron: '0,30 0,4,8 * * 1-5'
-  workflow_dispatch: {}
 
 # 高频并发保护：同一时刻只跑一个，排队等待而非并发
 concurrency:
@@ -55,6 +62,7 @@ jobs:
       - name: 抓取数据并生成 data.json
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          TEST_PUSH: ${{ github.event.inputs.test_push }}
         run: python build_data.py
 
       - name: 加密 data.json -> data.enc.txt（密码门）
@@ -92,7 +100,10 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
+          TEST_PUSH: ${{ github.event.inputs.test_push }}
         run: |
+          # 测试模式：不续跑（否则会把测试标记一路传下去，整天都在测试）
+          if [ "${TEST_PUSH:-0}" = "1" ]; then echo "测试轮次，不续跑"; exit 0; fi
           H=$(date -u +%H%M); DOW=$(date -u +%u)
           H10=$((10#$H))
           IN_AM=$([ $H10 -ge $((10#0128)) ] && [ $H10 -le $((10#0332)) ] && echo 1 || echo 0)
