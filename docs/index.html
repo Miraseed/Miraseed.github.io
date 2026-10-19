@@ -156,11 +156,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 }
 /* 手机横屏：屏幕矮，压缩非关键元素，把高度让给 K 线图 */
 @media(max-height:500px) and (orientation:landscape){
-  .hd{padding:6px 0}
-  .hd h1{font-size:14px}
-  .stats{margin:8px 0 2px}
-  .stats .stat{padding:6px}
-  .stats .v{font-size:15px}
+  header{display:none}          /* 顶栏横屏整体收起（数据时间在下方 meta 表仍有） */
   .tabs{margin:8px 0 6px}
   .tab{padding:5px 12px;font-size:12px}
   .kpbar{margin-bottom:6px;gap:8px}
@@ -347,7 +343,7 @@ function drawKline(){
   //  · 竖屏：沿用 0.72 比例，上限 460，且不超过视口高 − 180。
   const landscape = vw > vh;
   const H = landscape
-    ? Math.max(200, Math.min(Math.round(W*0.62), vh - 110))
+    ? Math.max(200, Math.min(Math.round(W*0.62), vh - 70))   // 横屏顶栏已收起，固定占用更少
     : Math.max(240, Math.min(460, Math.round(W*0.78), vh - 160));
   const PADL=52, PADR=10, PADT=10;
   const volH = 52;                      // IV分位副图高
