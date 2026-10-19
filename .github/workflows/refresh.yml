@@ -5,8 +5,10 @@ name: 刷新期权信号
 #   09:30-11:30 → UTC 01:30-03:30；13:00-15:00 → UTC 05:00-07:00
 # 说明：全部 7 个标的走新浪实时链（秒级，BS 反解 IV），全量约 3 秒。
 on:
-  # 手动触发：勾选「测试推送」后，本轮不发真实消息，只把卡片打印到日志
-  # （同时绕过"当日只推一次"的去重），便于改完排版立刻看效果。
+  # 手动触发：勾选「测试推送」后，写一个 docs/test_push.flag 空提交，
+  # 紧接着那一轮就会：卡片只打印到日志、不真发企微、绕过"当日只推一次"。
+  # 为什么用标记文件而不是直接传 env：build_data 跑的是主仓库 clone 下来的
+  # 代码，本轮 dispatch 的 inputs 只作用于本 job 的 shell，进不了 python。
   workflow_dispatch:
     inputs:
       test_push:
@@ -59,10 +61,27 @@ jobs:
           pip install --upgrade pip
           pip install -q pandas numpy requests scipy pyarrow cryptography
 
+      # 测试标记：本轮勾了「测试推送」就先落一个 flag 并提交，
+      # 让紧接的那一轮（checkout 时就能读到）进入测试模式。
+      - name: 测试推送开关
+        if: github.event.inputs.test_push == 'true'
+        run: |
+          mkdir -p docs
+          date -u +%Y-%m-%dT%H:%M:%SZ > docs/test_push.flag
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/test_push.flag
+          git commit -m "开启测试推送（只影响下一轮）" || true
+          for i in 1 2 3 4 5; do
+            if git push 2>&1; then echo "测试标记已提交"; break; fi
+            git pull --rebase -X ours origin main || git rebase --abort || true
+            sleep 5
+          done
+          sleep 5
+
       - name: 抓取数据并生成 data.json
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
-          TEST_PUSH: ${{ github.event.inputs.test_push }}
         run: python build_data.py
 
       - name: 加密 data.json -> data.enc.txt（密码门）
@@ -78,6 +97,8 @@ jobs:
           for f in docs/data.enc.txt docs/kline.enc.txt docs/kline_tail.enc.txt docs/history.json docs/push_state.json; do
             [ -f "$f" ] && git add "$f" || true
           done
+          # 测试标记被 build_data 消费删除后，要把删除一并提交，否则会一直测试下去
+          git add -A docs/test_push.flag 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "无变化，跳过提交"
           else
@@ -101,9 +122,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           TEST_PUSH: ${{ github.event.inputs.test_push }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           # 测试模式：不续跑（否则会把测试标记一路传下去，整天都在测试）
-          if [ "${TEST_PUSH:-0}" = "1" ]; then echo "测试轮次，不续跑"; exit 0; fi
+          if [ "${TEST_PUSH:-0}" = "1" ]; then
+            # 测试轮次：把开关那一轮写下的 flag 一并清掉，只留一份干净日志
+            [ -f docs/test_push.flag ] && rm -f docs/test_push.flag && \
+              git add -A docs/test_push.flag && \
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="github-actions[bot]@users.noreply.github.com" \
+                  commit -m "测试推送结束，清理标记" -q && \
+              git push -q "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main || true
+            echo "测试轮次，不续跑"; exit 0
+          fi
           H=$(date -u +%H%M); DOW=$(date -u +%u)
           H10=$((10#$H))
           IN_AM=$([ $H10 -ge $((10#0128)) ] && [ $H10 -le $((10#0332)) ] && echo 1 || echo 0)
