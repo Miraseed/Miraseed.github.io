@@ -35,6 +35,12 @@ jobs:
         run: |
           git clone --depth 1 "https://x-access-token:${GH_PAT}@github.com/Miraseed/etf-option-monitor.git" /tmp/mainrepo
           cp -r /tmp/mainrepo/code ./code
+          # 推送模块只在主仓库维护，必须一并同步（否则 build_data 报"未找到 web/push.py"）
+          mkdir -p ./web
+          cp /tmp/mainrepo/web/push.py ./web/push.py
+          cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
+          # 清理可能的旧副本，避免 import push 命中错误版本
+          rm -f ./code/push.py
           echo "主仓库已就绪"
 
       - uses: actions/setup-python@v5
