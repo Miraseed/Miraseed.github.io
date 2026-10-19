@@ -160,8 +160,8 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   .tabs{margin:8px 0 6px}
   .tab{padding:5px 12px;font-size:12px}
   /* 标的/周期/图例强制同一行：禁换行+整体缩小，图例跟在"全部"后面 */
-  .kpbar{flex-wrap:nowrap;margin-bottom:6px;gap:8px;white-space:nowrap}
-  .kpbar select{padding:4px 8px;font-size:12px;flex:none}
+  .kpbar{flex-wrap:nowrap;margin-bottom:6px;gap:8px;white-space:nowrap;overflow:hidden}
+  .kpbar select{padding:4px 8px;font-size:12px;flex:none;min-width:104px;max-width:150px}
   .kchips{flex:none;gap:5px}
   .kchip{padding:3px 9px;font-size:11px}
   .klegend{flex:none;font-size:10px;gap:7px;margin-left:auto}
