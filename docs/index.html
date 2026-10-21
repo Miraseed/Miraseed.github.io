@@ -381,6 +381,17 @@ function drawKline(){
   const X = i => x0 + (i+0.5)*bw;
   const pv = y => hi - (y-PADT)/mainH*(hi-lo);   // 像素 -> 价格
 
+  // 间隔条纹（斑马带）：按 4 条网格线把主图分成 4 横带，隔带填充极淡底色，
+  // 看盘时视线沿色带定位价格区间，比纯网格线更省眼（参考附图行情软件的样式）。
+  // 用前景色 3.5% 透明度填充，深色/浅色主题都自动协调，不会盖住 K 线。
+  g.fillStyle = fg; g.globalAlpha = .035;
+  for(let i=0;i<4;i++){
+    if(i%2===0) continue;                    // 只填第 1、3 带
+    const y1 = PADT + mainH*i/4, y2 = PADT + mainH*(i+1)/4;
+    g.fillRect(x0, y1, plotW, y2-y1);
+  }
+  g.globalAlpha = 1;
+
   // 网格 + 左侧价格刻度
   g.strokeStyle = line; g.lineWidth = 1; g.globalAlpha = .55;
   g.font = '10px -apple-system,sans-serif'; g.textAlign='right'; g.textBaseline='middle';
@@ -429,6 +440,9 @@ function drawKline(){
 
   // ---- IV 分位副图 ----
   const vy = PADT + mainH + gap;
+  g.fillStyle = fg; g.globalAlpha = .035;          // 副图同样加淡条纹（上下两半隔带）
+  g.fillRect(x0, vy, plotW, volH/2);
+  g.globalAlpha = 1;
   g.strokeStyle=line; g.globalAlpha=.55;
   g.beginPath(); g.moveTo(x0,vy); g.lineTo(x0+plotW,vy); g.stroke();
   g.globalAlpha=1;
