@@ -529,9 +529,18 @@ function klineHover(clientX, clientY){
   KHOV=best;
   const b=bars[best], dec=b[4]>=1000?2:(b[4]>=10?2:4);
   const ch = best>0 ? bars[best-1][4] : null;
-  const cc = ch ? ((b[4]/ch-1)*100).toFixed(2)+'%' : '—';
-  $('kTip').innerHTML = `<b>${esc(b[0])}</b>　开 ${b[1].toFixed(dec)}　高 ${b[2].toFixed(dec)}　`
-    + `低 ${b[3].toFixed(dec)}　收 <b>${b[4].toFixed(dec)}</b>（${cc}）　`
+  // 开/高/低/收统一标注相对上一收盘价的涨跌幅：涨红跌绿（与页面配色一致）
+  const pctVsPrev = v => {
+    if(!ch) return '';
+    const r = v/ch - 1;
+    const c = r>0 ? '#e63946' : (r<0 ? '#26a65b' : 'inherit');
+    return `<span style="color:${c}">(${(r>0?'+':'')+(r*100).toFixed(2)}%)</span>`;
+  };
+  $('kTip').innerHTML = `<b>${esc(b[0])}</b>　`
+    + `开 ${b[1].toFixed(dec)}${pctVsPrev(b[1])}　`
+    + `高 ${b[2].toFixed(dec)}${pctVsPrev(b[2])}　`
+    + `低 ${b[3].toFixed(dec)}${pctVsPrev(b[3])}　`
+    + `收 <b>${b[4].toFixed(dec)}</b>${pctVsPrev(b[4])}　`
     + `IV分位 ${pcts[best]==null?'—':(pcts[best]*100).toFixed(0)+'%'}`
     + (best===n-1 && KL.products[$('kProd').value]?.live ? '　<span style="color:#e6a23c">● 实时</span>' : '')
     + (sigs[best]?'　<span style="color:#ff5a5f;font-weight:700">▲ 卖沽信号</span>':'');
