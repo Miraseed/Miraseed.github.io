@@ -270,7 +270,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="tblwrap">
       <table>
         <thead><tr>
-          <th class="sortable" data-k="ts">触发时间</th><th class="sortable" data-k="name">标的</th>
+          <th class="sortable" data-k="ts">触发时间（北京时间）</th><th class="sortable" data-k="name">标的</th>
           <th class="sortable num" data-k="iv" style="text-align:right">ATM IV</th>
           <th class="sortable num" data-k="pct" style="text-align:right">IV分位</th>
           <th>建议合约</th><th>触发原因</th></tr></thead>
@@ -281,7 +281,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
 </div>
 
 <footer>
-  GitHub Pages 静态版：交易时段每3分钟自动刷新（全部标的走新浪实时链，BS 反解 IV）· 各卡片与表格均标注行情时间戳 · 数据仅供参考，不构成投资建议<br>
+  GitHub Pages 静态版：交易时段每3分钟自动刷新（含铁矿石夜盘 21:00–23:00；全部标的走新浪实时链，BS 反解 IV）· 各卡片与表格均标注行情时间戳 · 数据仅供参考，不构成投资建议<br>
   <span id="fPush"></span>
 </footer>
 
@@ -518,8 +518,12 @@ function drawKline(){
   const last = bars[n-1], prev = n>1?bars[n-2]:null;
   const chg = prev ? (last[4]/prev[4]-1) : null;
   const dec = last[4]>=1000?2:(last[4]>=10?2:4);
+  // 夜盘：bar 归属下一交易日，标题点明"夜盘"，避免看到未来日期以为出错
+  const _dstr = new Date().toISOString().slice(0,10);
+  const _isNight = p.live && last[0] > _dstr;
+  const _lbl = p.live ? (_isNight ? `最新盘中（夜盘·计入 ${last[0].slice(5)}）` : '最新盘中') : '最新收盘';
   $('kMeta').innerHTML = [
-    [(p.live?'最新盘中':'最新收盘'), `${last[4].toFixed(dec)}　<span style="color:${chg>0?red:(chg<0?green:fg2)}">${chg==null?'—':((chg>0?'+':'')+(chg*100).toFixed(2)+'%')}</span>${p.live?'　<span style="color:#e6a23c;font-size:11px">● 实时</span>':''}`],
+    [_lbl, `${last[4].toFixed(dec)}　<span style="color:${chg>0?red:(chg<0?green:fg2)}">${chg==null?'—':((chg>0?'+':'')+(chg*100).toFixed(2)+'%')}</span>${p.live?'　<span style="color:#e6a23c;font-size:11px">● 实时</span>':''}`],
     ['区间', `${bars[0][0]} ~ ${last[0]}（${n} 根）`],
     ['信号阈值', `IV分位 ≥ ${(p.th*100).toFixed(0)}%${p.iv_th?` 且 ATM IV ≥ ${(p.iv_th*100).toFixed(0)}%`:''}`],
     ['区间信号日', `${cnt} 天`],
