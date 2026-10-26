@@ -64,6 +64,7 @@ jobs:
           cp /tmp/mainrepo/web/github_action/paper.py ./paper.py
           cp /tmp/mainrepo/web/github_action/filters.py ./filters.py
           cp /tmp/mainrepo/web/github_action/risk_events.py ./risk_events.py
+          cp /tmp/mainrepo/web/github_action/gap_data.py ./gap_data.py
           cp /tmp/mainrepo/web/github_action/iv_history.py ./iv_history.py
           cp /tmp/mainrepo/web/github_action/review.py ./review.py
           cp /tmp/mainrepo/web/github_action/encrypt_data.py ./encrypt_data.py
