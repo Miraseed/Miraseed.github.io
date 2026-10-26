@@ -96,7 +96,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 逐个 add：某个文件不存在时不影响其它文件入暂存区
-          for f in docs/data.enc.txt docs/kline.enc.txt docs/kline_tail.enc.txt docs/iv_pct.enc.txt docs/history.json docs/positions.json docs/push_state.json docs/risk_log.json; do
+          for f in docs/data.enc.txt docs/kline.enc.txt docs/kline_tail.enc.txt docs/iv_pct.enc.txt docs/history.json docs/positions.json docs/push_state.json docs/risk_log.json docs/iv_state.json; do
             [ -f "$f" ] && git add "$f" || true
           done
           if git diff --cached --quiet; then
