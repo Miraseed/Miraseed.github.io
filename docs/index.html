@@ -111,6 +111,44 @@ header{
   color:var(--fg2);margin-top:9px;line-height:1.6;border-left:3px solid var(--blue)}
 .card.sig .strat{background:var(--red-bg);border-left-color:var(--red)}
 
+/* ---------- 折叠区（手机端信息分层）---------- */
+.c-fold{margin-top:9px;border-top:1px dashed var(--line);padding-top:7px}
+.c-fold>.fold-hd{
+  display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--fg3);
+  cursor:pointer;user-select:none;-webkit-user-select:none;padding:2px 0}
+.c-fold>.fold-hd::after{content:"▾";font-size:10px;margin-left:auto;transition:.18s;color:var(--fg3)}
+.c-fold.collapsed>.fold-hd::after{transform:rotate(-90deg)}
+.c-fold.collapsed>.fold-bd{display:none}
+.c-fold>.fold-bd{padding-top:2px}
+
+/* ---------- IV 分位走势 ---------- */
+.ivbox{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:9px 11px 4px;margin-bottom:12px;box-shadow:var(--shadow)}
+.ivhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;font-weight:600}
+.ivhd em{font-style:normal;font-weight:400;color:var(--fg3);font-size:11px;margin-left:5px}
+.ivhd select{background:#fafbfc;color:var(--fg);border:1px solid var(--line);
+  border-radius:7px;padding:3px 7px;font-size:12px;font-weight:600}
+.ivnow{margin-left:auto;font-size:11.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.ivnow b{font-size:13px}
+.ivtg{font-size:11px;color:var(--fg3);cursor:pointer;user-select:none;
+  border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+.ivtg:active{background:var(--line2)}
+.ivbox .kchart{border:none;padding:0;background:transparent}
+
+/* ---------- 风险事件条 ---------- */
+.riskbar{margin:10px 0 2px;border:1px solid rgba(232,163,61,.35);background:#fffbf2;
+  border-radius:var(--radius);padding:9px 12px;box-shadow:var(--shadow)}
+.riskbar .rh{font-size:11.5px;color:#a8701a;font-weight:700;margin-bottom:5px;
+  display:flex;align-items:center;gap:6px}
+.riskbar .rh u{text-decoration:none;margin-left:auto;font-weight:500;color:var(--fg3);cursor:pointer}
+.riskbar .ri{font-size:12px;color:var(--fg2);padding:3px 0;line-height:1.55;
+  display:flex;gap:6px;align-items:baseline}
+.riskbar .ri b{color:var(--fg);flex:none;font-weight:600}
+.riskbar .ri span.t{color:var(--fg3);font-size:11px;flex:none}
+.riskbar.collapsed .rb{display:none}
+.riskbar.danger{border-color:rgba(230,57,70,.4);background:var(--red-bg)}
+.riskbar.danger .rh{color:var(--red)}
+
 /* ---------- 表格 ---------- */
 .tblwrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
   overflow:auto;-webkit-overflow-scrolling:touch;box-shadow:var(--shadow)}
@@ -157,6 +195,14 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
   .stats{grid-template-columns:repeat(2,1fr)}
   .grid{grid-template-columns:1fr}
   .c-px{font-size:15px}
+  /* 手机竖屏：卡片首屏只留「标的 / IV分位 / 信号 / 价格」，
+     建议合约·结构提示默认折叠，点开再看（信息密度和扫读速度的折中） */
+  .card{padding:12px}
+  .c-top{margin-bottom:8px}
+  .c-name{font-size:15px}
+  .kv>div{padding:7px 8px}
+  .kv .v{font-size:14px}
+  .c-fold>.fold-hd{font-size:12px;padding:5px 0}
 }
 /* ---------- K线复盘 ---------- */
 .kpbar{display:flex;align-items:center;gap:10px;margin:0 0 8px;flex-wrap:wrap}
@@ -242,7 +288,21 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="tab" data-t="hist">历史信号</div>
   </div>
 
-  <section id="p-board"><div class="grid" id="board"></div></section>
+  <section id="p-board">
+    <!-- 风险事件条（非交易信号）：IV跳升 / 跳空 / 保证金。仅在有事件时显示 -->
+    <div class="riskbar hide" id="riskBar"></div>
+    <!-- IV 分位一年期走势：一眼看出「高位持续多久」 -->
+    <div class="ivbox hide" id="ivBox">
+      <div class="ivhd">
+        <span>IV 分位走势<em>近一年</em></span>
+        <select id="ivProd"></select>
+        <span class="ivnow" id="ivNow"></span>
+        <span class="ivtg" id="ivTg"></span>
+      </div>
+      <div class="kchart" style="height:150px"><canvas id="ivCv"></canvas></div>
+    </div>
+    <div class="grid" id="board"></div>
+  </section>
 
   <section id="p-kline" class="hide">
     <div class="kpbar">
@@ -279,6 +339,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
         <thead><tr>
           <th>标的</th><th>合约</th><th>开仓日</th>
           <th style="text-align:right">开仓价</th><th style="text-align:right">现价/结算</th>
+          <th style="text-align:right">保证金</th><th style="text-align:right">最大亏损</th>
           <th style="text-align:right">盈亏(元)</th><th style="text-align:right">收益率</th>
           <th>状态</th></tr></thead>
         <tbody id="posBody"></tbody>
@@ -857,14 +918,27 @@ function card(r){
       <div><div class="k">触发阈值</div><div class="v">${th!==null?Math.round(th*100)+'%':'—'}</div>${gapHtml}</div>
     </div>`;
 
-  const rows = [];
+  const rows = [];              // 首屏可见的次要信息（一行一条）
+  const deep = [];              // 折叠区：建议合约 / 资金占用 / 质量过滤 / 结构提示
+
+  // ---- 建议合约（折叠区第一条，信号卡才有）----
   if(r['建议合约'] && r['建议合约']!=='—')
-    rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv"><b>${esc(r['建议合约'])}</b>　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+    deep.push(`<div class="row"><span class="rk">建议合约</span><span class="rv"><b>${esc(r['建议合约'])}</b>　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+  // ---- 资金占用：卖方保证金 + 最大亏损（比 Delta 更该被看见的两件事）----
+  const mg = _okNum(r['保证金估算']), mxl = _okNum(r['最大亏损']), nom = _okNum(r['名义市值']);
+  if(mg!==null || mxl!==null){
+    const parts = [];
+    if(mg!==null) parts.push(`保证金 <b>${(mg/10000).toFixed(1)}万</b>`);
+    if(mxl!==null) parts.push(`最大亏损 <b>${(mxl/10000).toFixed(1)}万</b>`);
+    if(nom!==null) parts.push(`名义 ${(nom/10000).toFixed(1)}万`);
+    const ratio = (mg&&mxl) ? `　<span style="color:var(--fg3)">(${(mxl/mg).toFixed(1)}×保证金)</span>` : '';
+    deep.push(`<div class="row"><span class="rk">资金占用</span><span class="rv">${parts.join('　')}${ratio}</span></div>`);
+  }
   // 组合仓位：同簇信号超上限时这里会显示"仓位已满·观察"，避免同方向多倍下注
   if(r['执行建议'])
-    rows.push(`<div class="row"><span class="rk">组合仓位</span><span class="rv">${
-      r['执行建议']==='建议开仓' ? '<b class="up">● 建议开仓</b>' : '<span style="color:var(--amber)">○ 仓位已满·观察</span>'
-    }${r['保证金估算']?`　保证金约 ${(r['保证金估算']/10000).toFixed(1)} 万`:''}</span></div>`);
+    deep.push(`<div class="row"><span class="rk">组合仓位</span><span class="rv">${
+      r['执行建议']==='建议开仓' ? '<b class="up">● 建议开仓</b>' : '<span style="color:var(--amber)">○ '+esc(r['执行建议'])+'</span>'
+    }</span></div>`);
   // 多维过滤：VRP / 偏斜 / 期限结构 / 到期周
   if(r['质量评级']){
     const gcol = r['质量评级']==='优' ? 'var(--red)' : (r['质量评级']==='良' ? 'var(--amber)' : 'var(--fg3)');
@@ -872,24 +946,32 @@ function card(r){
     if(_okNum(r['VRP'])!==null) chips.push(`VRP ${(r['VRP']*100).toFixed(1)}pt`);
     if(_okNum(r['偏斜25D'])!==null) chips.push(`偏斜 ${(r['偏斜25D']*100).toFixed(1)}pt` + (_okNum(r['偏斜分位'])!==null?`（分位 ${Math.round(r['偏斜分位']*100)}%）`:''));
     if(r['过滤说明']) chips.push(esc(r['过滤说明']));
-    rows.push(`<div class="row"><span class="rk">质量过滤</span><span class="rv"><b style="color:${gcol}">${esc(r['质量评级'])} ${r['质量评分']??'—'}/4</b>　<span style="color:var(--fg3)">${chips.join(' · ')}</span></span></div>`);
+    deep.push(`<div class="row"><span class="rk">质量过滤</span><span class="rv"><b style="color:${gcol}">${esc(r['质量评级'])} ${r['质量评分']??'—'}/4</b>　<span style="color:var(--fg3)">${chips.join(' · ')}</span></span></div>`);
   }
-  // 期限结构降级为小字行（重要度低于阈值，不放主格）
+  // 期限结构（小字行）
   if(ts!==null&&ts!==undefined&&!isNaN(ts)){
     const nv = r['近月IV'], xv = r['次近月IV'];
     const det = (nv!=null&&xv!=null) ? `（近${(nv*100).toFixed(1)} / 次${(xv*100).toFixed(1)}）` : '';
-    rows.push(`<div class="row"><span class="rk">期限结构</span><span class="rv" style="color:var(--fg3)">${tsHtml} ${det}</span></div>`);
+    deep.push(`<div class="row"><span class="rk">期限结构</span><span class="rv" style="color:var(--fg3)">${tsHtml} ${det}</span></div>`);
   }
   // 双重条件标的：分位够但 IV 不够时单独提示（否则用户会困惑"为什么没触发"）
   const ivTh = _okNum(r['阈值IV']);
   const iv = _okNum(r['ATM_IV']);
   if(ivTh!==null && iv!==null && gapPt!==null && gapPt>=0 && iv<ivTh)
-    rows.push(`<div class="row"><span class="rk">双条件</span><span class="rv" style="color:var(--amber)">分位已达标，ATM IV 还差 ${((ivTh-iv)*100).toFixed(1)}pt（需≥${Math.round(ivTh*100)}%）</span></div>`);
+    deep.push(`<div class="row"><span class="rk">双条件</span><span class="rv" style="color:var(--amber)">分位已达标，ATM IV 还差 ${((ivTh-iv)*100).toFixed(1)}pt（需≥${Math.round(ivTh*100)}%）</span></div>`);
   // 铁矿石等"仅观察"品种的特殊说明必须保留，避免误当成可操作信号
   if(String(r['信号']).includes('仅观察') && r['建议策略'])
     rows.push(`<div class="row"><span class="rk">说明</span><span class="rv" style="color:var(--fg3)">${esc(r['建议策略'])}</span></div>`);
   if(r['行情时间戳'])
-    rows.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${esc(r['行情时间戳'])}</span></div>`);
+    deep.push(`<div class="row"><span class="rk">行情时间</span><span class="rv" style="color:var(--fg3)">${esc(r['行情时间戳'])}</span></div>`);
+
+  // 折叠区：手机竖屏默认收起（首屏只留 标的/信号/价格/IV分位/触发阈值），
+  // 桌面与已展开过的卡片保持展开——用 localStorage 记住用户偏好。
+  const deepOpen = isDeepOpen();
+  const fold = deep.length ? `<div class="c-fold${deepOpen?'':' collapsed'}" data-fold="1">
+      <div class="fold-hd">建议合约 · 资金占用 · 质量过滤</div>
+      <div class="fold-bd">${deep.join('')}</div>
+    </div>` : '';
 
   // 策略块：信号卡压缩成纪律短语（长句每次都一样，不再占版面）；
   // 异常/缺失卡保留原始说明（有诊断价值）
@@ -907,8 +989,29 @@ function card(r){
       ${badge}
       ${pxHtml}
     </div>
-    ${kv}${rows.join('')}${strat}
+    ${kv}${rows.join('')}${strat}${fold}
   </div>`;
+}
+
+/* ---------- 折叠区开合 ----------
+   默认：手机竖屏（≤560px）收起、其它展开。用户点过一次后写入 localStorage，
+   之后所有卡片统一跟随该偏好（避免每张卡各自记忆、来回不一致）。 */
+function _narrow(){ return (window.innerWidth||999) <= 560; }
+function isDeepOpen(){
+  const v = localStorage.getItem('om_fold');
+  if(v === '1') return true;
+  if(v === '0') return false;
+  return !_narrow();
+}
+function initFold(){
+  // 事件委托：卡片会整体重绘，逐个绑会漏
+  $('board').addEventListener('click', e=>{
+    const hd = e.target.closest('.fold-hd');
+    if(!hd) return;
+    const box = hd.parentElement;
+    const collapsed = box.classList.toggle('collapsed');
+    localStorage.setItem('om_fold', collapsed ? '0' : '1');
+  });
 }
 
 function render(s){
@@ -942,8 +1045,195 @@ function render(s){
   renderHist(hist);
   renderPos(s.positions, s.pos_summary, s.portfolio);
   renderBT(s.backtest, s.skew_hist);
+  renderRisk(s.risk_events, s.margin_info);
 
   $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+}
+
+/* ---------- 风险事件条（非交易信号）----------
+   三类：IV 单日跳升 / 跳空开盘 / 保证金占用。
+   与「★ 信号」视觉上刻意区分：橙黄警示条、无合约信息、只给"该怎么办"。 */
+function renderRisk(events, marginInfo){
+  const box = $('riskBar');
+  const evs = events||[];
+  const mi = marginInfo||{};
+  // 保证金占用率常驻显示（即使未触发预警，也让用户随时看到"还剩多少空间"）
+  const mgLine = (mi && mi['占用率']!==null && mi['占用率']!==undefined)
+    ? `<div class="ri"><b>保证金占用</b><span>${(mi['占用率']*100).toFixed(0)}%（合计 ${(mi['合计']/10000).toFixed(1)} 万 / 权益 ${(mi['账户权益']/10000).toFixed(1)} 万）</span></div>`
+    : '';
+  if(!evs.length && !mgLine){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const danger = evs.some(e=>e['级别']==='风险');
+  box.classList.toggle('danger', danger);
+  const ICON = {vol_jump:'IV', gap:'跳空', margin:'保证金'};
+  const items = evs.map(e=>`<div class="ri">
+      <b>${esc(ICON[e['类型']]||'事件')}</b>
+      <span>${esc(e['标的']||'')}　${esc(e['标题']||'')}
+      ${e['详情']?`<span style="color:var(--fg3)">｜${esc(e['详情'])}</span>`:''}
+      ${e['建议']?`<br><span style="color:var(--amber)">→ ${esc(e['建议'])}</span>`:''}</span>
+      <span class="t">${esc(String(e['时间']||'').slice(11,16))}</span>
+    </div>`).join('');
+  const collapsed = localStorage.getItem('om_risk') === '0';
+  box.classList.toggle('collapsed', collapsed);
+  box.innerHTML = `<div class="rh">⚠ 风险事件 ${evs.length ? `<span style="font-weight:500;color:var(--fg3)">${evs.length} 条（非交易信号）</span>` : ''}
+      <u id="riskTg">${collapsed?'展开':'收起'}</u></div>
+    <div class="rb">${mgLine}${items || '<div class="ri" style="color:var(--fg3)">今日暂无风险事件</div>'}</div>`;
+  $('riskTg').onclick = ()=>{
+    const c = box.classList.toggle('collapsed');
+    localStorage.setItem('om_risk', c ? '0' : '1');
+    $('riskTg').textContent = c ? '展开' : '收起';
+  };
+}
+
+/* ---------- IV 分位一年走势 ----------
+   目的：卡片只有"当前分位"这一个数字，看不出「这个高位是刚上来，还是已经持续半年」。
+   这里画近 250 交易日分位曲线 + 触发阈值横线 + 25%/75% 参考线，
+   并在顶部给出「当前连续高于阈值 N 天 / 一年内有 M 天高于阈值」，
+   把"高位持续多久"直接读出来。 */
+let IVP = null;            // iv_pct.json 解包结果
+let IV_TG = 'th';          // 参考线模式：th=触发阈值 / q=25%-75% 分位带
+const IV_CACHE = {};
+
+function ivUnpack(p){
+  if(!p || !p.p) return null;
+  const days=[]; let cur = new Date((p.d0||'2020-01-01')+'T00:00:00');
+  const dd = p.dd||[];
+  for(let i=0;i<p.p.length;i++){
+    if(i>0 && dd[i]!=null) cur = new Date(cur.getTime()+dd[i]*86400000);
+    days.push(cur);
+  }
+  const fmt = d => (d.getMonth()+1)+'/'+d.getDate();
+  return {th:p.th, vals:p.p, labels:days.map(fmt),
+          full:days.map(d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')),
+          sig:String(p.sig||'')};
+}
+
+async function loadIV(){
+  if(!PWD) return;
+  try{
+    const r = await fetch('iv_pct.enc.txt?t='+Date.now(), {cache:'no-store'});
+    if(!r.ok) throw new Error('http '+r.status);
+    const raw = await decryptBlob(PWD, await r.json());
+    IVP = {};
+    for(const [k,p] of Object.entries(raw.products||{})){
+      const u = ivUnpack(p);
+      if(u) IVP[k] = u;
+    }
+    initIVChart();
+  }catch(e){
+    // 不影响主看板：静默降级（区块隐藏）
+    IVP = null;
+  }
+}
+
+function initIVChart(){
+  const sel = $('ivProd'); if(!sel) return;
+  const box = $('ivBox');
+  const names = Object.keys(IVP||{});
+  if(!names.length){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  const keep = sel.value;
+  sel.innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join('');
+  if(names.includes(keep)) sel.value = keep;
+  sel.onchange = drawIV;
+  $('ivTg').onclick = ()=>{
+    IV_TG = IV_TG==='th' ? 'q' : 'th';
+    $('ivTg').textContent = IV_TG==='th' ? '切换：分位带' : '切换：阈值线';
+    drawIV();
+  };
+  $('ivTg').textContent = IV_TG==='th' ? '切换：分位带' : '切换：阈值线';
+  drawIV();
+}
+
+function drawIV(){
+  const cv = $('ivCv'); if(!cv || !IVP) return;
+  const d = IVP[$('ivProd').value]; if(!d) return;
+  const dpr = window.devicePixelRatio||1;
+  const W = Math.max(240, Math.floor((cv.parentElement.clientWidth||800)));
+  const H = 150;
+  cv.width = W*dpr; cv.height = H*dpr; cv.style.width='100%'; cv.style.height=H+'px';
+  const g = cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  const cs = getComputedStyle(document.body);
+  const C = k => (cs.getPropertyValue(k)||'').trim();
+  const blue = C('--blue')||'#2b6cb0', fg3 = C('--fg3')||'#888', line = C('--line')||'#e6e8eb';
+  const red = '#e63946', amber = '#e8a33d';
+
+  const PADL = 30, PADR = 8, PADT = 8, PADB = 16;
+  const vals = d.vals, n = vals.length;
+  const X = i => PADL + i*(W-PADL-PADR)/Math.max(1,n-1);
+  const Y = v => PADT + (100-v)/100*(H-PADT-PADB);      // 0~100 固定纵轴，便于跨标的比较
+  const th = (d.th!=null) ? Math.round(d.th*100) : null;
+
+  // 网格（0/25/50/75/100）
+  g.strokeStyle = line; g.lineWidth = 1; g.font='9px -apple-system,sans-serif';
+  g.textAlign='right'; g.textBaseline='middle';
+  [0,25,50,75,100].forEach(v=>{
+    g.beginPath(); g.moveTo(PADL, Y(v)); g.lineTo(W-PADR, Y(v)); g.stroke();
+    g.fillStyle = fg3; g.fillText(v+'%', PADL-4, Y(v));
+  });
+
+  // 参考线：阈值线（红）或 25/75 分位带（灰虚）
+  if(IV_TG==='th' && th!==null){
+    g.strokeStyle='rgba(230,57,70,.8)'; g.setLineDash([5,3]); g.lineWidth=1.2;
+    g.beginPath(); g.moveTo(PADL, Y(th)); g.lineTo(W-PADR, Y(th)); g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = red; g.textAlign='left';
+    g.fillText('阈值 '+th+'%', PADL+3, Y(th)-6);
+  }else if(IV_TG==='q'){
+    g.strokeStyle = fg3; g.globalAlpha=.55; g.setLineDash([4,3]); g.lineWidth=1;
+    [25,75].forEach(v=>{ g.beginPath(); g.moveTo(PADL,Y(v)); g.lineTo(W-PADR,Y(v)); g.stroke(); });
+    g.setLineDash([]); g.globalAlpha=1;
+    g.fillStyle = fg3; g.textAlign='left';
+    g.fillText('75%', PADL+3, Y(75)-6); g.fillText('25%', PADL+3, Y(25)-6);
+  }
+
+  // 高于阈值的区间做淡红底色（"高位持续多久"最直观的呈现）
+  if(th!==null){
+    g.fillStyle = 'rgba(230,57,70,.09)';
+    let i=0;
+    while(i<n){
+      if(vals[i]>=th){
+        let j=i; while(j<n && vals[j]>=th) j++;
+        g.fillRect(X(i), PADT, Math.max(1.2, X(j-1)-X(i)), H-PADT-PADB);
+        i=j;
+      } else i++;
+    }
+  }
+
+  // 分位折线
+  g.strokeStyle = blue; g.lineWidth = 1.7; g.beginPath();
+  let started=false;
+  vals.forEach((v,i)=>{ if(v<0) return; const x=X(i), y=Y(v);
+    if(!started){ g.moveTo(x,y); started=true; } else g.lineTo(x,y); });
+  g.stroke();
+  // 末点
+  const lv = vals[n-1];
+  if(lv>=0){
+    g.fillStyle = (th!==null && lv>=th) ? red : blue;
+    g.beginPath(); g.arc(X(n-1), Y(lv), 3, 0, 6.284); g.fill();
+  }
+  // 首末日期
+  g.fillStyle = fg3; g.textAlign='left'; g.textBaseline='alphabetic';
+  g.fillText(d.labels[0], PADL, H-4);
+  g.textAlign='right'; g.fillText(d.labels[n-1], W-PADR, H-4);
+
+  // 统计：当前连续高于阈值天数 / 一年内高于阈值天数 / 最长连续
+  let cur=0; for(let i=n-1;i>=0;i--){ if(th!==null && vals[i]>=th) cur++; else break; }
+  const above = th!==null ? vals.filter(v=>v>=th).length : 0;
+  let run=0, maxrun=0;
+  if(th!==null) vals.forEach(v=>{ if(v>=th){ run++; maxrun=Math.max(maxrun,run); } else run=0; });
+  const hot = th!==null && lv>=th;
+  $('ivNow').innerHTML = `当前 <b style="color:${hot?red:'var(--fg)'}">${lv>=0?lv+'%':'—'}</b>`;
+  $('ivTg').title = '切换参考线：触发阈值 / 25-75 分位带';
+  const box = $('ivBox');
+  let tip = box.querySelector('.ivstat');
+  if(!tip){ tip = document.createElement('div'); tip.className='ivstat';
+    box.appendChild(tip); }
+  tip.style.cssText = 'font-size:10.5px;color:var(--fg3);padding:2px 0 7px;font-variant-numeric:tabular-nums';
+  tip.innerHTML = th===null ? '' :
+    `阈值 ${th}%　·　当前${hot?`<b style="color:${red}">已连续 ${cur} 个交易日高于阈值</b>`:'低于阈值'}
+     　·　一年内 <b style="color:var(--fg2)">${above}/250</b> 天高于阈值
+     　·　最长连续 <b style="color:var(--fg2)">${maxrun}</b> 天`;
 }
 
 /* ---------- 信号回测 ---------- */
@@ -1053,16 +1343,24 @@ function renderPos(positions, summary, portfolio){
                : ((p['盈亏率']*100>=0?'+':'')+(p['盈亏率']*100).toFixed(1)+'%');
     const st = String(p['状态']||'');
     const stTxt = st==='到期结算' ? '到期结算' : st.startsWith('持有') ? '持有' : st;
+    // 资金占用：单张保证金（按最新标的价估算）+ 最大亏损（K×乘数−已收权利金）
+    const mult = Number(p['乘数']||10000);
+    const rateM = (String(p['标的']||'').indexOf('铁矿')>=0 ? 0.12 : 0.13);
+    const Sv = Number(p['最新标的价']||0);
+    const mgP = Sv>0 ? Sv*mult*rateM : null;
+    const mxlP = Number(p['行权价']||0)*mult - Number(p['开仓价']||0)*mult;
     return `<tr>
       <td>${esc(p['标的'])}</td>
       <td>${esc(p['合约月'])} 认沽 K≈${esc(p['行权价'])}</td>
       <td class="ts">${esc(p['开仓日期'])}</td>
       <td class="num">${num(p['开仓价'],4)}</td>
       <td class="num">${num(st==='到期结算'?(p['平仓价']??0):p['现价'],4)}</td>
+      <td class="num">${mgP===null?'—':(mgP/10000).toFixed(1)+'万'}</td>
+      <td class="num">${mxlP>0?(mxlP/10000).toFixed(1)+'万':'—'}</td>
       <td class="num ${cls}">${pnl>=0?'+':''}${pnl.toFixed(0)}</td>
       <td class="num ${cls}">${rate}</td>
       <td>${esc(stTxt)}</td></tr>`;
-  }).join('') : '<tr><td colspan="8" class="empty">暂无纸面持仓（出现 ★ 信号后自动开仓记录）</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="empty">暂无纸面持仓（出现 ★ 信号后自动开仓记录）</td></tr>';
 
   const win = s['胜率'];
   const parts = [];
@@ -1123,6 +1421,14 @@ function initHistSort(){
   });
 }
 initHistSort();   // 表头为静态 HTML，脚本末尾绑定一次即可
+initFold();       // 卡片折叠区（事件委托，卡片重绘也不会失效）
+
+// 窗口尺寸变化：IV 分位图按容器宽度重画（横竖屏切换 / 旋转后布局有延迟，补两次）
+let _rsT = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(_rsT);
+  _rsT = setTimeout(()=>{ if(IVP && !$('p-board').classList.contains('hide')) drawIV(); }, 150);
+});
 
 /* ---------- 密码门解密（AES-GCM + PBKDF2）：正确密码才解锁 ---------- */
 async function decryptBlob(pwd, blob){
@@ -1152,6 +1458,7 @@ async function pull(){
     const s = await loadSnap();
     FAILS=0; render(s);
     if(!KL) loadKline();      // K线数据加载一次即可（失败不影响主看板）
+    if(!IVP) loadIV();        // IV 分位一年走势（独立小文件，失败静默降级）
   }catch(e){
     FAILS++;
     if(String(e).includes('OperationError') || String(e).includes('Cipher')){
@@ -1175,6 +1482,7 @@ async function tryGate(){
     $('gate').classList.add('hide');
     FAILS=0; render(s);
     if(!KL) loadKline();
+    if(!IVP) loadIV();
     startPolling();   // 首次登录也要启动定时轮询（幂等：先清旧计时器）
     $('gErr').textContent='';
   }catch(e){
@@ -1191,10 +1499,28 @@ function startPolling(){
   loadKline();                          // K线数据与看板并行加载（不阻塞看板）
   pull();
   if(!KL) loadKline();
+  if(!IVP) loadIV();                    // IV 分位一年走势，与看板并行
   TIMER = setInterval(pull, 120000);   // 每2分钟拉一次最新数据
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden) pull(); });
 }
-if(PWD){ $('gate').classList.add('hide'); startPolling(); }
+/* 本地预览用：?mock=1 时用内置样张渲染，跳过密码门（不影响线上，正常访问不带参数） */
+if(location.search.indexOf('mock=1')>=0){
+  $('gate').classList.add('hide');
+  fetch('mock.json?t='+Date.now()).then(r=>r.json()).then(s=>{
+    render(s);
+    // 演示用：构造一年分位序列
+    IVP={};
+    for(const r of (s.rows||[])){
+      const v=[]; let x=r['IV分位']!=null?Math.round(r['IV分位']*100):40;
+      for(let i=0;i<250;i++){ x=Math.max(2,Math.min(99, x + Math.round((Math.random()-0.5)*14))); v.push(x); }
+      v[249]=r['IV分位']!=null?Math.round(r['IV分位']*100):v[249];
+      const th=r['阈值']||0.75;
+      IVP[r['标的']]={th:th, vals:v, labels:v.map((_,i)=>(i%30? '':'')+((i%12+1)+'/'+(i%28+1))),
+        full:[], sig:v.map(x=>x>=th*100?1:0).join('')};
+    }
+    initIVChart();
+  }).catch(e=>{ document.body.insertAdjacentHTML('afterbegin','<div style="padding:20px;color:#e63946">mock 加载失败: '+e+'</div>'); });
+}else if(PWD){ $('gate').classList.add('hide'); startPolling(); }
 else { $('gPwd').focus(); }
 </script>
 </body>
