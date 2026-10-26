@@ -306,6 +306,10 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
         <tbody id="btScanBody"></tbody>
       </table>
     </div>
+    <div class="ktip" style="margin:14px 0 6px">25Δ 偏斜历史（近 250 个交易日）
+      <select id="skProd" style="margin-left:8px"></select>
+      <span id="skNow" style="margin-left:10px"></span></div>
+    <div class="kchart" style="height:200px"><canvas id="skCv"></canvas></div>
     <div class="ktip" style="margin-top:6px">信号日＝滚动 250 日 IV 分位 ≥ 阈值；安全率＝未来 20 日标的跌幅未超 5%（认沽约 7%~13% 虚值，5% 为保守缓冲）。样本为上表统计区间内的全部触发日。</div>
   </section>
 
@@ -866,7 +870,7 @@ function card(r){
     const gcol = r['质量评级']==='优' ? 'var(--red)' : (r['质量评级']==='良' ? 'var(--amber)' : 'var(--fg3)');
     const chips = [];
     if(_okNum(r['VRP'])!==null) chips.push(`VRP ${(r['VRP']*100).toFixed(1)}pt`);
-    if(_okNum(r['偏斜25D'])!==null) chips.push(`偏斜 ${(r['偏斜25D']*100).toFixed(1)}pt`);
+    if(_okNum(r['偏斜25D'])!==null) chips.push(`偏斜 ${(r['偏斜25D']*100).toFixed(1)}pt` + (_okNum(r['偏斜分位'])!==null?`（分位 ${Math.round(r['偏斜分位']*100)}%）`:''));
     if(r['过滤说明']) chips.push(esc(r['过滤说明']));
     rows.push(`<div class="row"><span class="rk">质量过滤</span><span class="rv"><b style="color:${gcol}">${esc(r['质量评级'])} ${r['质量评分']??'—'}/4</b>　<span style="color:var(--fg3)">${chips.join(' · ')}</span></span></div>`);
   }
@@ -937,14 +941,16 @@ function render(s){
   const hist = s.history||[];
   renderHist(hist);
   renderPos(s.positions, s.pos_summary, s.portfolio);
-  renderBT(s.backtest);
+  renderBT(s.backtest, s.skew_hist);
 
   $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
 }
 
 /* ---------- 信号回测 ---------- */
-function renderBT(bt){
+let SKEW = null;
+function renderBT(bt, skewHist){
   bt = bt||{};
+  SKEW = skewHist||SKEW||{};
   const ps = bt.products||[];
   $('btMeta').innerHTML = ps.length
     ? `统计生成：${esc(bt.generated||'—')}　·　${esc(bt['说明']||'')}`
@@ -983,6 +989,56 @@ function renderBT(bt){
       return `<td class="num ${cls}" title="样本 ${c['样本数']} 天">${Math.round(v*100)}%<span style="color:var(--fg3);font-size:10px">（${iv}）</span></td>`;
     }).join('')+'</tr>';
   }).join('') : '<tr><td class="empty">暂无数据</td></tr>';
+  initSkewChart();
+}
+
+/* ---------- 25Δ 偏斜历史曲线 ---------- */
+function initSkewChart(){
+  const sel = $('skProd'); if(!sel) return;
+  const names = Object.keys(((SKEW||{}).series)||{});
+  const keep = sel.value;
+  sel.innerHTML = names.map(n=>`<option>${esc(n)}</option>`).join('');
+  if(names.includes(keep)) sel.value = keep;
+  sel.onchange = drawSkew;
+  drawSkew();
+}
+
+function drawSkew(){
+  const cv = $('skCv'); if(!cv) return;
+  const rec = (((SKEW||{}).series)||{})[$('skProd').value];
+  if(!rec || !rec.values || !rec.values.length){ $('skNow').textContent='暂无历史偏斜数据'; return; }
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.parentElement.clientWidth || 800, h = 200;
+  cv.width = w*dpr; cv.height = h*dpr; cv.style.width='100%'; cv.style.height=h+'px';
+  const g = cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  const cs = getComputedStyle(document.body);
+  const blue = (cs.getPropertyValue('--blue')||'#2b6cb0').trim() || '#2b6cb0';
+  const fg3 = (cs.getPropertyValue('--fg3')||'#888').trim() || '#888';
+  const vals = rec.values.slice(-250), dates = rec.dates.slice(-250);
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const pad = (hi-lo)*0.15 || 0.01;
+  const y0 = lo-pad, y1 = hi+pad;
+  const X = i => 22 + i*(w-44)/Math.max(1, vals.length-1);
+  const Y = v => 14 + (y1-v)/(y1-y0)*(h-38);
+  // 25% 分位线与 0 轴
+  const sorted = [...vals].sort((a,b)=>a-b);
+  const q25 = sorted[Math.floor(sorted.length*0.25)];
+  g.strokeStyle = fg3; g.globalAlpha = .45; g.setLineDash([4,4]); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(22, Y(q25)); g.lineTo(w-22, Y(q25)); g.stroke();
+  g.beginPath(); g.moveTo(22, Y(0)); g.lineTo(w-22, Y(0)); g.stroke();
+  g.setLineDash([]); g.globalAlpha = 1;
+  g.fillStyle = fg3; g.font = '10px system-ui';
+  g.fillText('25%分位', 24, Y(q25)-3); g.fillText('0', 24, Y(0)-3);
+  // 折线
+  g.strokeStyle = blue; g.lineWidth = 1.6; g.beginPath();
+  vals.forEach((v,i)=>{ i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); });
+  g.stroke();
+  // 最新点
+  const lv = vals[vals.length-1];
+  g.fillStyle = '#e63946'; g.beginPath(); g.arc(X(vals.length-1), Y(lv), 3, 0, 7); g.fill();
+  const pct = vals.filter(v=>v<lv).length / vals.length;
+  const pcls = pct>=0.5 ? 'up' : (pct<0.25 ? 'down' : '');
+  $('skNow').innerHTML = `当前 <b>${(lv*100).toFixed(1)}pt</b>　分位 <b class="${pcls}">${Math.round(pct*100)}%</b>　${esc(dates[0])} ~ ${esc(dates[dates.length-1])}`;
 }
 
 /* ---------- 纸面持仓 ---------- */
