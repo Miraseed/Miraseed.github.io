@@ -1,0 +1,87 @@
+name: 数据链监控
+
+# 交易时段内若数据超过阈值没有更新，主动推企微告警。
+# 解决"链条静默中断、只能靠人发现页面不动"的问题（GitHub schedule 降频、
+# 自续跑断链、抓取持续失败都会表现为 data.enc.txt 不再提交）。
+on:
+  schedule:
+    # UTC 01-03 / 04-07 / 13-15 = 北京 09:00-11:59 / 12:00-15:59 / 21:00-23:59
+    - cron: '*/5 1-3,4-7,13-15 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检查数据新鲜度并在停滞时告警
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, datetime, urllib.request
+
+          BJ = datetime.timezone(datetime.timedelta(hours=8))
+          now = datetime.datetime.now(datetime.timezone.utc)
+          bj = now.astimezone(BJ)
+
+          # 只在 A 股/夜盘时段检查（含开盘前 5 分钟与收盘后 5 分钟缓冲）
+          if bj.weekday() >= 5:
+              print('周末，跳过'); raise SystemExit
+          mins = bj.hour * 60 + bj.minute
+          sessions = [(9*60+25, 11*60+35), (12*60+55, 15*60+5), (20*60+55, 23*60+5)]
+          if not any(a <= mins <= b for a, b in sessions):
+              print(f'{bj:%H:%M} 非交易时段，跳过'); raise SystemExit
+
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPO']
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/commits?path=docs/data.enc.txt&per_page=1',
+              headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'})
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  commits = json.load(r)
+          except Exception as e:
+              print('读取提交记录失败:', e); raise SystemExit
+          if not commits:
+              print('无数据提交记录'); raise SystemExit
+
+          last = commits[0]['commit']['committer']['date']
+          last_dt = datetime.datetime.strptime(last, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
+          stale = (now - last_dt).total_seconds() / 60
+          print(f'最近数据更新 {last_dt.astimezone(BJ):%H:%M:%S}（北京），已停滞 {stale:.0f} 分钟')
+
+          # 分级告警：10/30/60/120 分钟各提醒一次（±2 分钟内命中，避免每轮刷屏）
+          level = next((x for x in (10, 30, 60, 120) if x <= stale <= x + 2), None)
+          if level is None:
+              print('未达告警阈值'); raise SystemExit
+
+          hook = os.environ.get('WECOM_WEBHOOK', '').strip()
+          if not hook:
+              print('未配置 WECOM_WEBHOOK，跳过发送'); raise SystemExit
+
+          level_txt = '⚠️ 数据链异常' if level < 60 else '🚨 数据链中断'
+          body = (f"## {level_txt}\n"
+                  f"信号数据已 **{stale:.0f} 分钟** 未更新\n"
+                  f"最近更新：{last_dt.astimezone(BJ):%m-%d %H:%M:%S}（北京时间）\n"
+                  f"当前时间：{bj:%m-%d %H:%M:%S}\n"
+                  f"> 页面可能显示旧价。可在 Actions 手动触发「刷新期权信号」恢复；"
+                  f"若反复中断，检查新浪接口与 GH_PAT 是否过期。")
+          data = json.dumps({'msgtype': 'markdown', 'markdown': {'content': body}}).encode()
+          req = urllib.request.Request(hook, data=data,
+                                       headers={'Content-Type': 'application/json'})
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  print('告警已发送:', r.read().decode()[:120])
+          except Exception as e:
+              print('告警发送失败:', e)
+          PY
