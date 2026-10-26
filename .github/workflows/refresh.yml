@@ -91,6 +91,10 @@ jobs:
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TEST_PUSH: ${{ github.event.inputs.test_push }}
+          # 账户权益（元）：用于估算保证金占用率。
+          # 优先取 Repository variable（不敏感、UI 里能直接看到当前值、改起来方便），
+          # 没有则取 secret（想对数字保密时用这个）。都没配就只做相对提示。
+          ACCOUNT_EQUITY: ${{ vars.ACCOUNT_EQUITY || secrets.ACCOUNT_EQUITY }}
         run: python build_data.py
 
       - name: 自检·数据新鲜度（K线必须跟上当日）
