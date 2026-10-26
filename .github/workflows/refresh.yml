@@ -83,16 +83,21 @@ jobs:
           pip install --upgrade pip
           pip install -q pandas numpy requests scipy pyarrow cryptography
 
-      - name: 自检（把历史 bug 固化成断言）
-        # 只跑纯逻辑断言，不联网、不写文件。失败会直接中止本次运行，
-        # 避免带着回归去抓数据、发推送（历史上曾因此发出一批误报事件）。
-        run: python selfcheck.py
+      - name: 自检·逻辑断言（历史 bug 回归）
+        # 纯逻辑断言，不依赖当日数据，失败会中止本次运行
+        run: python selfcheck.py --logic
 
       - name: 抓取数据并生成 data.json
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
           TEST_PUSH: ${{ github.event.inputs.test_push }}
         run: python build_data.py
+
+      - name: 自检·数据新鲜度（K线必须跟上当日）
+        # 放在 data.json / K线生成本之后才有意义。
+        # 这一条曾真实失效：K线重建排在推送之后，云端 kline 停在 10-14
+        # 而当天已是 10-26，导致"今日信号回顾"只能退回读滞后的 panel CSV。
+        run: python selfcheck.py --data
 
       - name: 加密 data.json -> data.enc.txt（密码门）
         env:
