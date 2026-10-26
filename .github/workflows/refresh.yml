@@ -64,6 +64,7 @@ jobs:
           cp /tmp/mainrepo/web/github_action/paper.py ./paper.py
           cp /tmp/mainrepo/web/github_action/filters.py ./filters.py
           cp -f /tmp/mainrepo/web/github_action/backtest.json ./backtest.json || true
+          cp -f /tmp/mainrepo/web/github_action/skew_history.json ./skew_history.json || true
           rm -f ./code/push.py
           echo "主仓库已就绪"
 
