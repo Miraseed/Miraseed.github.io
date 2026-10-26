@@ -63,6 +63,9 @@ jobs:
           cp /tmp/mainrepo/web/github_action/build_kline.py ./build_kline.py
           cp /tmp/mainrepo/web/github_action/paper.py ./paper.py
           cp /tmp/mainrepo/web/github_action/filters.py ./filters.py
+          cp /tmp/mainrepo/web/github_action/risk_events.py ./risk_events.py
+          cp /tmp/mainrepo/web/github_action/iv_history.py ./iv_history.py
+          cp /tmp/mainrepo/web/github_action/encrypt_data.py ./encrypt_data.py
           cp -f /tmp/mainrepo/web/github_action/backtest.json ./backtest.json || true
           cp -f /tmp/mainrepo/web/github_action/skew_history.json ./skew_history.json || true
           rm -f ./code/push.py
@@ -93,7 +96,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 逐个 add：某个文件不存在时不影响其它文件入暂存区
-          for f in docs/data.enc.txt docs/kline.enc.txt docs/kline_tail.enc.txt docs/history.json docs/positions.json docs/push_state.json; do
+          for f in docs/data.enc.txt docs/kline.enc.txt docs/kline_tail.enc.txt docs/iv_pct.enc.txt docs/history.json docs/positions.json docs/push_state.json docs/risk_log.json; do
             [ -f "$f" ] && git add "$f" || true
           done
           if git diff --cached --quiet; then
