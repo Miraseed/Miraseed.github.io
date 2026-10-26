@@ -878,7 +878,12 @@ function card(r){
   // 展示小数位：优先后端给的「价格位数」（铁矿石=1 位，对齐期货通）；缺失则按量级推断
   const _sx = _okNum(S);
   const sDec = (_okNum(r['价格位数'])!==null) ? r['价格位数'] : (_sx!==null && Math.abs(_sx)>=1000 ? 2 : 4);
-  const pxHtml = `<div class="c-px-wrap">
+  // 跳空悬浮提示：涨跌幅是「现价 vs 昨收」，跳空是「今开 vs 昨收」，两者常被混为一谈
+  const _gp = _okNum(r['跳空']), _op = _okNum(r['今开']), _pc = _okNum(r['昨收']);
+  const gapTip = (_gp!==null && _op!==null && _pc!==null)
+    ? `今开 ${num(_op,sDec)} / 昨收 ${num(_pc,sDec)}　跳空 ${(_gp>0?'+':'')+(_gp*100).toFixed(2)}%`
+    : '';
+  const pxHtml = `<div class="c-px-wrap"${gapTip?` title="${esc(gapTip)}"`:''}>
       <span class="c-px ${dir!=='flat'?dir:''}">${num(S, sDec)}</span>
       <span class="c-chg ${dir}">${chgTxt}</span>
     </div>`;
