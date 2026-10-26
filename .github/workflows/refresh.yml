@@ -65,6 +65,7 @@ jobs:
           cp /tmp/mainrepo/web/github_action/filters.py ./filters.py
           cp /tmp/mainrepo/web/github_action/risk_events.py ./risk_events.py
           cp /tmp/mainrepo/web/github_action/iv_history.py ./iv_history.py
+          cp /tmp/mainrepo/web/github_action/review.py ./review.py
           cp /tmp/mainrepo/web/github_action/encrypt_data.py ./encrypt_data.py
           cp -f /tmp/mainrepo/web/github_action/backtest.json ./backtest.json || true
           cp -f /tmp/mainrepo/web/github_action/skew_history.json ./skew_history.json || true
