@@ -233,6 +233,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="tab on" data-t="board">信号看板</div>
     <div class="tab" data-t="kline">K线复盘</div>
     <div class="tab" data-t="atm">合约IV对照</div>
+    <div class="tab" data-t="pos">纸面持仓</div>
     <div class="tab" data-t="hist">历史信号</div>
   </div>
 
@@ -264,6 +265,21 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
         <tbody id="atmBody"></tbody>
       </table>
     </div>
+  </section>
+
+  <section id="p-pos" class="hide">
+    <div class="ktip" id="posSum" style="margin-bottom:6px">—</div>
+    <div class="tblwrap">
+      <table>
+        <thead><tr>
+          <th>标的</th><th>合约</th><th>开仓日</th>
+          <th style="text-align:right">开仓价</th><th style="text-align:right">现价/结算</th>
+          <th style="text-align:right">盈亏(元)</th><th style="text-align:right">收益率</th>
+          <th>状态</th></tr></thead>
+        <tbody id="posBody"></tbody>
+      </table>
+    </div>
+    <div class="ktip" style="margin-top:6px">纸面持仓按 1 张标准仓记录：★ 信号自动"开仓"，逐轮按实时链报价盯市，到期按内在价值结算，用于评估信号真实收益。收益率＝盈亏 / 开仓权利金。</div>
   </section>
 
   <section id="p-hist" class="hide">
@@ -300,7 +316,7 @@ document.querySelectorAll('.tab').forEach(t=>{
   t.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
     t.classList.add('on');
-    ['board','kline','atm','hist'].forEach(k=>$('p-'+k).classList.toggle('hide', k!==t.dataset.t));
+    ['board','kline','atm','pos','hist'].forEach(k=>$('p-'+k).classList.toggle('hide', k!==t.dataset.t));
     if(t.dataset.t==='kline') drawKline();
   };
 });
@@ -813,6 +829,11 @@ function card(r){
   const rows = [];
   if(r['建议合约'] && r['建议合约']!=='—')
     rows.push(`<div class="row"><span class="rk">建议合约</span><span class="rv"><b>${esc(r['建议合约'])}</b>　Δ${num(r['建议Delta'],2)}　剩${r['剩余天数']??'—'}天</span></div>`);
+  // 组合仓位：同簇信号超上限时这里会显示"仓位已满·观察"，避免同方向多倍下注
+  if(r['执行建议'])
+    rows.push(`<div class="row"><span class="rk">组合仓位</span><span class="rv">${
+      r['执行建议']==='建议开仓' ? '<b class="up">● 建议开仓</b>' : '<span style="color:var(--amber)">○ 仓位已满·观察</span>'
+    }${r['保证金估算']?`　保证金约 ${(r['保证金估算']/10000).toFixed(1)} 万`:''}</span></div>`);
   // 期限结构降级为小字行（重要度低于阈值，不放主格）
   if(ts!==null&&ts!==undefined&&!isNaN(ts)){
     const nv = r['近月IV'], xv = r['次近月IV'];
@@ -879,8 +900,46 @@ function render(s){
 
   const hist = s.history||[];
   renderHist(hist);
+  renderPos(s.positions, s.pos_summary, s.portfolio);
 
   $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+}
+
+/* ---------- 纸面持仓 ---------- */
+function renderPos(positions, summary, portfolio){
+  const list = positions||[];
+  const s = summary||{};
+  const rows = [...list].sort((a,b)=>String(b['开仓时间']||'').localeCompare(String(a['开仓时间']||'')));
+  $('posBody').innerHTML = rows.length ? rows.map(p=>{
+    const pnl = Number(p['盈亏']||0);
+    const cls = pnl>0.005?'up':(pnl<-0.005?'down':'');
+    const rate = (p['盈亏率']===null||p['盈亏率']===undefined) ? '—'
+               : ((p['盈亏率']*100>=0?'+':'')+(p['盈亏率']*100).toFixed(1)+'%');
+    const st = String(p['状态']||'');
+    const stTxt = st==='到期结算' ? '到期结算' : st.startsWith('持有') ? '持有' : st;
+    return `<tr>
+      <td>${esc(p['标的'])}</td>
+      <td>${esc(p['合约月'])} 认沽 K≈${esc(p['行权价'])}</td>
+      <td class="ts">${esc(p['开仓日期'])}</td>
+      <td class="num">${num(p['开仓价'],4)}</td>
+      <td class="num">${num(st==='到期结算'?(p['平仓价']??0):p['现价'],4)}</td>
+      <td class="num ${cls}">${pnl>=0?'+':''}${pnl.toFixed(0)}</td>
+      <td class="num ${cls}">${rate}</td>
+      <td>${esc(stTxt)}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="empty">暂无纸面持仓（出现 ★ 信号后自动开仓记录）</td></tr>';
+
+  const win = s['胜率'];
+  const parts = [];
+  parts.push(`持仓 <b>${s['持仓数']??0}</b> 张`);
+  parts.push(`浮动 <b class="${(s['浮动盈亏']||0)>=0?'up':'down'}">${((s['浮动盈亏']||0)>=0?'+':'')}${Number(s['浮动盈亏']||0).toFixed(0)}</b> 元`);
+  parts.push(`已结算 <b>${s['已结算']??0}</b> 笔`);
+  parts.push(`已实现 ${Number(s['已实现盈亏']||0)>=0?'+':''}${Number(s['已实现盈亏']||0).toFixed(0)} 元`);
+  if(win!==null && win!==undefined) parts.push(`胜率 <b>${(win*100).toFixed(0)}%</b>`);
+  if(portfolio && portfolio['信号数'])
+    parts.push(`今日信号 ${portfolio['信号数']} 个，可执行 ${portfolio['可执行']??0} 个`
+      + (portfolio['保证金估算']?`（保证金约 ${(portfolio['保证金估算']/10000).toFixed(1)} 万）`:''));
+  $('posSum').innerHTML = parts.join('　·　')
+    + (portfolio && portfolio['说明'] ? `<br><span style="color:var(--amber)">${esc(portfolio['说明'])}</span>` : '');
 }
 
 /* ---------- 历史信号排序：默认触发时间降序，前四列点击切换 ---------- */
