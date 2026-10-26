@@ -23,6 +23,10 @@
   --radius:10px;
   --shadow:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
 }
+
+/* 表格/文本红涨绿跌（A股惯例） */
+td.up,b.up{color:var(--red)}
+td.down,b.down{color:var(--green)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{
   margin:0;background:var(--bg);color:var(--fg);
@@ -234,6 +238,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="tab" data-t="kline">K线复盘</div>
     <div class="tab" data-t="atm">合约IV对照</div>
     <div class="tab" data-t="pos">纸面持仓</div>
+    <div class="tab" data-t="bt">信号回测</div>
     <div class="tab" data-t="hist">历史信号</div>
   </div>
 
@@ -282,6 +287,28 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="ktip" style="margin-top:6px">纸面持仓按 1 张标准仓记录：★ 信号自动"开仓"，逐轮按实时链报价盯市，到期按内在价值结算，用于评估信号真实收益。收益率＝盈亏 / 开仓权利金。</div>
   </section>
 
+  <section id="p-bt" class="hide">
+    <div class="ktip" id="btMeta" style="margin-bottom:6px">—</div>
+    <div class="tblwrap">
+      <table>
+        <thead><tr><th>标的</th><th style="text-align:right">阈值</th><th style="text-align:right">样本</th>
+          <th style="text-align:right">5日平均</th><th style="text-align:right">10日平均</th>
+          <th style="text-align:right">20日平均</th><th style="text-align:right">20日安全率</th>
+          <th style="text-align:right">平均最大回撤</th><th style="text-align:right">10日IV变化</th>
+          <th style="text-align:right">IV回落概率</th></tr></thead>
+        <tbody id="btBody"></tbody>
+      </table>
+    </div>
+    <div class="ktip" style="margin:10px 0 6px">阈值敏感性：20 日安全率（括号内为 10 日 IV 回落概率）</div>
+    <div class="tblwrap">
+      <table>
+        <thead><tr id="btScanHead"></tr></thead>
+        <tbody id="btScanBody"></tbody>
+      </table>
+    </div>
+    <div class="ktip" style="margin-top:6px">信号日＝滚动 250 日 IV 分位 ≥ 阈值；安全率＝未来 20 日标的跌幅未超 5%（认沽约 7%~13% 虚值，5% 为保守缓冲）。样本为上表统计区间内的全部触发日。</div>
+  </section>
+
   <section id="p-hist" class="hide">
     <div class="tblwrap">
       <table>
@@ -316,7 +343,7 @@ document.querySelectorAll('.tab').forEach(t=>{
   t.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
     t.classList.add('on');
-    ['board','kline','atm','pos','hist'].forEach(k=>$('p-'+k).classList.toggle('hide', k!==t.dataset.t));
+    ['board','kline','atm','pos','bt','hist'].forEach(k=>$('p-'+k).classList.toggle('hide', k!==t.dataset.t));
     if(t.dataset.t==='kline') drawKline();
   };
 });
@@ -834,6 +861,15 @@ function card(r){
     rows.push(`<div class="row"><span class="rk">组合仓位</span><span class="rv">${
       r['执行建议']==='建议开仓' ? '<b class="up">● 建议开仓</b>' : '<span style="color:var(--amber)">○ 仓位已满·观察</span>'
     }${r['保证金估算']?`　保证金约 ${(r['保证金估算']/10000).toFixed(1)} 万`:''}</span></div>`);
+  // 多维过滤：VRP / 偏斜 / 期限结构 / 到期周
+  if(r['质量评级']){
+    const gcol = r['质量评级']==='优' ? 'var(--red)' : (r['质量评级']==='良' ? 'var(--amber)' : 'var(--fg3)');
+    const chips = [];
+    if(_okNum(r['VRP'])!==null) chips.push(`VRP ${(r['VRP']*100).toFixed(1)}pt`);
+    if(_okNum(r['偏斜25D'])!==null) chips.push(`偏斜 ${(r['偏斜25D']*100).toFixed(1)}pt`);
+    if(r['过滤说明']) chips.push(esc(r['过滤说明']));
+    rows.push(`<div class="row"><span class="rk">质量过滤</span><span class="rv"><b style="color:${gcol}">${esc(r['质量评级'])} ${r['质量评分']??'—'}/4</b>　<span style="color:var(--fg3)">${chips.join(' · ')}</span></span></div>`);
+  }
   // 期限结构降级为小字行（重要度低于阈值，不放主格）
   if(ts!==null&&ts!==undefined&&!isNaN(ts)){
     const nv = r['近月IV'], xv = r['次近月IV'];
@@ -901,8 +937,52 @@ function render(s){
   const hist = s.history||[];
   renderHist(hist);
   renderPos(s.positions, s.pos_summary, s.portfolio);
+  renderBT(s.backtest);
 
   $('fPush').textContent = s.push_enabled ? '企业微信推送：已启用' : '企业微信推送：未配置';
+}
+
+/* ---------- 信号回测 ---------- */
+function renderBT(bt){
+  bt = bt||{};
+  const ps = bt.products||[];
+  $('btMeta').innerHTML = ps.length
+    ? `统计生成：${esc(bt.generated||'—')}　·　${esc(bt['说明']||'')}`
+    : '暂无回测数据（docs/backtest.json 未生成）';
+  const pctOr = (o,k)=>{ const v=(o||{})[k]; return (v===null||v===undefined)?'—':((v*100>=0?'+':'')+(v*100).toFixed(1)+'%'); };
+  $('btBody').innerHTML = ps.length ? ps.map(p=>{
+    const safe = (p['20日']||{})['安全率'];
+    const sc = (safe===null||safe===undefined) ? '' : (safe>=0.9?'up':(safe<0.8?'down':''));
+    return `<tr>
+      <td>${esc(p['标的'])}</td>
+      <td class="num">${Math.round((p['阈值']||0)*100)}%</td>
+      <td class="num">${p['样本数']||0}</td>
+      <td class="num">${pctOr(p['5日'],'平均收益')}</td>
+      <td class="num">${pctOr(p['10日'],'平均收益')}</td>
+      <td class="num">${pctOr(p['20日'],'平均收益')}</td>
+      <td class="num ${sc}">${(safe===null||safe===undefined)?'—':Math.round(safe*100)+'%'}</td>
+      <td class="num">${pctOr(p['20日'],'平均最大回撤')}</td>
+      <td class="num">${pctOr(p['IV10日'],'平均IV变化')}</td>
+      <td class="num">${(p['IV10日']&&p['IV10日']['IV回落概率']!=null)?Math.round(p['IV10日']['IV回落概率']*100)+'%':'—'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="10" class="empty">暂无数据</td></tr>';
+
+  const scan = bt.scan||{};
+  const names = Object.keys(scan);
+  const ths = [...new Set(names.flatMap(n=>Object.keys(scan[n]||{})))].sort();
+  $('btScanHead').innerHTML = '<th>标的</th>'
+    + ths.map(t=>`<th style="text-align:right">${Math.round(parseFloat(t)*100)}%</th>`).join('');
+  $('btScanBody').innerHTML = names.length ? names.map(n=>{
+    const row = scan[n]||{};
+    return `<tr><td>${esc(n)}</td>` + ths.map(t=>{
+      const c = row[t];
+      if(!c || c['安全率']===null || c['安全率']===undefined) return '<td class="num">—</td>';
+      const v = c['安全率'];
+      const cls = v>=0.9?'up':(v<0.8?'down':'');
+      const iv = (c['IV回落概率']===null||c['IV回落概率']===undefined)?'—':Math.round(c['IV回落概率']*100)+'%';
+      return `<td class="num ${cls}" title="样本 ${c['样本数']} 天">${Math.round(v*100)}%<span style="color:var(--fg3);font-size:10px">（${iv}）</span></td>`;
+    }).join('')+'</tr>';
+  }).join('') : '<tr><td class="empty">暂无数据</td></tr>';
 }
 
 /* ---------- 纸面持仓 ---------- */
