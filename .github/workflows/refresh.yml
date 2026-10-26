@@ -68,6 +68,7 @@ jobs:
           cp /tmp/mainrepo/web/github_action/iv_history.py ./iv_history.py
           cp /tmp/mainrepo/web/github_action/review.py ./review.py
           cp /tmp/mainrepo/web/github_action/encrypt_data.py ./encrypt_data.py
+          cp /tmp/mainrepo/web/github_action/selfcheck.py ./selfcheck.py
           cp -f /tmp/mainrepo/web/github_action/backtest.json ./backtest.json || true
           cp -f /tmp/mainrepo/web/github_action/skew_history.json ./skew_history.json || true
           rm -f ./code/push.py
@@ -81,6 +82,11 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -q pandas numpy requests scipy pyarrow cryptography
+
+      - name: 自检（把历史 bug 固化成断言）
+        # 只跑纯逻辑断言，不联网、不写文件。失败会直接中止本次运行，
+        # 避免带着回归去抓数据、发推送（历史上曾因此发出一批误报事件）。
+        run: python selfcheck.py
 
       - name: 抓取数据并生成 data.json
         env:
