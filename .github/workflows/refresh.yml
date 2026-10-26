@@ -62,6 +62,8 @@ jobs:
           cp /tmp/mainrepo/web/github_action/build_data.py ./build_data.py
           cp /tmp/mainrepo/web/github_action/build_kline.py ./build_kline.py
           cp /tmp/mainrepo/web/github_action/paper.py ./paper.py
+          cp /tmp/mainrepo/web/github_action/filters.py ./filters.py
+          cp -f /tmp/mainrepo/web/github_action/backtest.json ./backtest.json || true
           rm -f ./code/push.py
           echo "主仓库已就绪"
 
