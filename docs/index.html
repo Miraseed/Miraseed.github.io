@@ -82,6 +82,9 @@ header{
 .c-chg.up{color:var(--red);background:var(--red-bg)}
 .c-chg.down{color:var(--green);background:var(--green-bg)}
 .c-chg.flat{color:var(--fg3);background:var(--line2)}
+/* 跳空：与涨跌幅并用时更小更淡，避免抢主数字的视觉权重 */
+.c-gap{font-size:10.5px;color:var(--fg3);font-variant-numeric:tabular-nums;
+  border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:2px;white-space:nowrap}
 .c-px.up{color:var(--red)} .c-px.down{color:var(--green)}
 .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap;flex:none}
 .badge.sig{background:var(--red-bg);color:var(--red);border:1px solid rgba(230,57,70,.28)}
@@ -878,14 +881,16 @@ function card(r){
   // 展示小数位：优先后端给的「价格位数」（铁矿石=1 位，对齐期货通）；缺失则按量级推断
   const _sx = _okNum(S);
   const sDec = (_okNum(r['价格位数'])!==null) ? r['价格位数'] : (_sx!==null && Math.abs(_sx)>=1000 ? 2 : 4);
-  // 跳空悬浮提示：涨跌幅是「现价 vs 昨收」，跳空是「今开 vs 昨收」，两者常被混为一谈
+  // 跳空：涨跌幅是「现价 vs 昨收」，跳空是「今开 vs 昨收」，两者常被混为一谈。
+  // 只在 |跳空| ≥1% 时才显示——小缺口没有信息量，反而稀释涨跌幅。
+  // 卖方关心的是"没机会反应的隔夜缺口"，这正是与日内涨跌的区别。
   const _gp = _okNum(r['跳空']), _op = _okNum(r['今开']), _pc = _okNum(r['昨收']);
-  const gapTip = (_gp!==null && _op!==null && _pc!==null)
-    ? `今开 ${num(_op,sDec)} / 昨收 ${num(_pc,sDec)}　跳空 ${(_gp>0?'+':'')+(_gp*100).toFixed(2)}%`
+  const gapTxt = (_gp!==null && Math.abs(_gp)>=0.01)
+    ? `<span class="c-gap" title="今开 ${num(_op,sDec)} / 昨收 ${num(_pc,sDec)}">跳空${(_gp>0?'+':'')+(_gp*100).toFixed(1)}%</span>`
     : '';
-  const pxHtml = `<div class="c-px-wrap"${gapTip?` title="${esc(gapTip)}"`:''}>
+  const pxHtml = `<div class="c-px-wrap">
       <span class="c-px ${dir!=='flat'?dir:''}">${num(S, sDec)}</span>
-      <span class="c-chg ${dir}">${chgTxt}</span>
+      <span class="c-chg ${dir}">${chgTxt}</span>${gapTxt}
     </div>`;
 
   const q = r['IV分位'];
