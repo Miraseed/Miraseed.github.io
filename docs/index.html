@@ -899,7 +899,7 @@ function card(r){
 
   // ---- 触发阈值（大字格，替代期限结构）----
   // 阈值来自后端行字段；老数据兜底用本地表
-  const TH_FALLBACK = {'科创50ETF':0.65,'创业板ETF':0.55,'上证50ETF':0.80,
+  const TH_FALLBACK = {'科创50ETF':0.80,'创业板ETF':0.55,'上证50ETF':0.80,
                        '沪深300ETF':0.75,'中证500ETF':0.85,'中证1000股指':0.75,'铁矿石期权':0.75};
   const th = _okNum(r['阈值']) ?? TH_FALLBACK[r['标的']] ?? null;
   const gapPt = (q!==null&&q!==undefined&&th!==null) ? Math.round((q-th)*100) : null;
