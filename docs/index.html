@@ -82,9 +82,6 @@ header{
 .c-chg.up{color:var(--red);background:var(--red-bg)}
 .c-chg.down{color:var(--green);background:var(--green-bg)}
 .c-chg.flat{color:var(--fg3);background:var(--line2)}
-/* 跳空：与涨跌幅并用时更小更淡，避免抢主数字的视觉权重 */
-.c-gap{font-size:10.5px;color:var(--fg3);font-variant-numeric:tabular-nums;
-  border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:2px;white-space:nowrap}
 .c-px.up{color:var(--red)} .c-px.down{color:var(--green)}
 .badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap;flex:none}
 .badge.sig{background:var(--red-bg);color:var(--red);border:1px solid rgba(230,57,70,.28)}
@@ -340,7 +337,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
     <div class="tblwrap">
       <table>
         <thead><tr>
-          <th>标的</th><th>合约</th><th>开仓日</th>
+          <th>标的</th><th>合约</th><th>开仓日</th><th style="text-align:right">张数</th>
           <th style="text-align:right">开仓价</th><th style="text-align:right">现价/结算</th>
           <th style="text-align:right">保证金</th><th style="text-align:right">最大亏损</th>
           <th style="text-align:right">盈亏(元)</th><th style="text-align:right">收益率</th>
@@ -348,7 +345,7 @@ footer{text-align:center;color:var(--fg3);font-size:11px;padding:24px 14px 8px;l
         <tbody id="posBody"></tbody>
       </table>
     </div>
-    <div class="ktip" style="margin-top:6px">纸面持仓按 1 张标准仓记录：★ 信号自动"开仓"，逐轮按实时链报价盯市，到期按内在价值结算，用于评估信号真实收益。收益率＝盈亏 / 开仓权利金。</div>
+    <div class="ktip" style="margin-top:6px">纸面持仓按名义对等仓记录：★ 信号自动"开仓"，ETF 张数＝50万÷单张名义（约 9~45 张，行权价低则张数多）、股指 1 张，各信号名义敞口与中证1000 单张相当；逐轮按实时链报价盯市，到期按内在价值结算，用于评估信号真实收益。收益率＝盈亏 / 开仓权利金。</div>
   </section>
 
   <section id="p-bt" class="hide">
@@ -881,16 +878,9 @@ function card(r){
   // 展示小数位：优先后端给的「价格位数」（铁矿石=1 位，对齐期货通）；缺失则按量级推断
   const _sx = _okNum(S);
   const sDec = (_okNum(r['价格位数'])!==null) ? r['价格位数'] : (_sx!==null && Math.abs(_sx)>=1000 ? 2 : 4);
-  // 跳空：涨跌幅是「现价 vs 昨收」，跳空是「今开 vs 昨收」，两者常被混为一谈。
-  // 只在 |跳空| ≥1% 时才显示——小缺口没有信息量，反而稀释涨跌幅。
-  // 卖方关心的是"没机会反应的隔夜缺口"，这正是与日内涨跌的区别。
-  const _gp = _okNum(r['跳空']), _op = _okNum(r['今开']), _pc = _okNum(r['昨收']);
-  const gapTxt = (_gp!==null && Math.abs(_gp)>=0.01)
-    ? `<span class="c-gap" title="今开 ${num(_op,sDec)} / 昨收 ${num(_pc,sDec)}">跳空${(_gp>0?'+':'')+(_gp*100).toFixed(1)}%</span>`
-    : '';
   const pxHtml = `<div class="c-px-wrap">
       <span class="c-px ${dir!=='flat'?dir:''}">${num(S, sDec)}</span>
-      <span class="c-chg ${dir}">${chgTxt}</span>${gapTxt}
+      <span class="c-chg ${dir}">${chgTxt}</span>
     </div>`;
 
   const q = r['IV分位'];
@@ -1353,16 +1343,18 @@ function renderPos(positions, summary, portfolio){
                : ((p['盈亏率']*100>=0?'+':'')+(p['盈亏率']*100).toFixed(1)+'%');
     const st = String(p['状态']||'');
     const stTxt = st==='到期结算' ? '到期结算' : st.startsWith('持有') ? '持有' : st;
-    // 资金占用：单张保证金（按最新标的价估算）+ 最大亏损（K×乘数−已收权利金）
+    // 资金占用：该仓保证金（按最新标的价×张数估算）+ 最大亏损（K×乘数×张数−已收权利金）
     const mult = Number(p['乘数']||10000);
+    const lots = Number(p['张数']||1);
     const rateM = (String(p['标的']||'').indexOf('铁矿')>=0 ? 0.12 : 0.13);
     const Sv = Number(p['最新标的价']||0);
-    const mgP = Sv>0 ? Sv*mult*rateM : null;
-    const mxlP = Number(p['行权价']||0)*mult - Number(p['开仓价']||0)*mult;
+    const mgP = Sv>0 ? Sv*mult*rateM*lots : null;
+    const mxlP = (Number(p['行权价']||0)*mult - Number(p['开仓价']||0)*mult)*lots;
     return `<tr>
       <td>${esc(p['标的'])}</td>
       <td>${esc(p['合约月'])} 认沽 K≈${esc(p['行权价'])}</td>
       <td class="ts">${esc(p['开仓日期'])}</td>
+      <td class="num">${lots}</td>
       <td class="num">${num(p['开仓价'],4)}</td>
       <td class="num">${num(st==='到期结算'?(p['平仓价']??0):p['现价'],4)}</td>
       <td class="num">${mgP===null?'—':(mgP/10000).toFixed(1)+'万'}</td>
@@ -1370,11 +1362,11 @@ function renderPos(positions, summary, portfolio){
       <td class="num ${cls}">${pnl>=0?'+':''}${pnl.toFixed(0)}</td>
       <td class="num ${cls}">${rate}</td>
       <td>${esc(stTxt)}</td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="empty">暂无纸面持仓（出现 ★ 信号后自动开仓记录）</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="empty">暂无纸面持仓（出现 ★ 信号后自动开仓记录）</td></tr>';
 
   const win = s['胜率'];
   const parts = [];
-  parts.push(`持仓 <b>${s['持仓数']??0}</b> 张`);
+  parts.push(`持仓 <b>${s['持仓数']??0}</b> 笔 / <b>${s['张数']??(s['持仓数']??0)}</b> 张`);
   parts.push(`浮动 <b class="${(s['浮动盈亏']||0)>=0?'up':'down'}">${((s['浮动盈亏']||0)>=0?'+':'')}${Number(s['浮动盈亏']||0).toFixed(0)}</b> 元`);
   parts.push(`已结算 <b>${s['已结算']??0}</b> 笔`);
   parts.push(`已实现 ${Number(s['已实现盈亏']||0)>=0?'+':''}${Number(s['已实现盈亏']||0).toFixed(0)} 元`);
