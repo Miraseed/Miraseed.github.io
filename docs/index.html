@@ -1014,6 +1014,37 @@ function initFold(){
   });
 }
 
+/* 状态判断：区分「实时 / 休市 / 数据停滞 / 取数异常」，
+   避免周末、盘后或链路中断时仍误显示"实时" */
+function _bjParts(){
+  const fmt=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+  const m={}; for(const p of fmt.formatToParts(new Date())) if(p.type!=='literal') m[p.type]=p.value;
+  const wd={'周一':1,'周二':2,'周三':3,'周四':4,'周五':5,'周六':6,'周日':7}[m.weekday]||0;
+  return {wd, h:parseInt(m.hour,10)||0, mi:parseInt(m.minute,10)||0};
+}
+function _isTradingNow(){
+  const {wd,h,mi}=_bjParts();
+  if(wd<1||wd>5) return false;
+  const t=h*60+mi;
+  // 上午盘 9:30-11:30 / 下午盘 13:00-15:00 / 铁矿石夜盘 21:00-23:00（北京时间）
+  return (t>=570&&t<=690)||(t>=780&&t<=900)||(t>=1260&&t<=1380);
+}
+function _parseBJ(s){
+  if(!s||s==='—') return null;
+  const m=s.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if(!m) return null;
+  return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]-8,+m[5])); // 视作北京时间，转 UTC
+}
+function _stateHtml(s){
+  if(!s.ok) return {html:`<span style="color:#e8a33d">取数异常，显示上次数据</span>`,bad:true};
+  const lr=_parseBJ(s.last_run);
+  const stamp=(s.last_run||'—').slice(5,16);
+  if(!lr) return {html:`<b>实时</b> · 交易时段每3分钟刷新`,bad:false};
+  const fresh=Math.round((Date.now()-lr.getTime())/60000);
+  if(!_isTradingNow()) return {html:`<span style="color:#8a909c">休市中 · 数据截至 ${stamp}</span>`,bad:false};
+  if(fresh>15) return {html:`<span style="color:#e8a33d">数据停滞 ${fresh} 分钟 · 截至 ${stamp}</span>`,bad:true};
+  return {html:`<b>实时</b> · 交易时段每3分钟刷新`,bad:false};
+}
 function render(s){
   const rows = s.rows||[];
   $('sPool').querySelector('.v').textContent = s.pool_size||rows.length||'—';
@@ -1022,10 +1053,9 @@ function render(s){
   $('sCost').querySelector('.v').textContent = s.cost_sec!=null ? s.cost_sec+'s' : '—';
 
   $('mRun').textContent = (s.last_run||'—').slice(5,16);
-  $('mState').innerHTML = s.ok
-    ? `<b>实时</b> · 交易时段每3分钟刷新`
-    : `<span style="color:#e8a33d">取数异常，显示上次数据</span>`;
-  $('dot').classList.toggle('bad', !s.ok);
+  const _st=_stateHtml(s);
+  $('mState').innerHTML = _st.html;
+  $('dot').classList.toggle('bad', _st.bad);
 
   $('board').innerHTML = rows.length ? rows.map(card).join('')
     : '<div class="empty">暂无数据，服务正在首次抓取…</div>';
