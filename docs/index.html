@@ -1052,8 +1052,11 @@ function render(s){
   $('sWait').querySelector('.v').textContent = rows.length ? (rows.length-(s.n_signal||0)) : '—';
   $('sCost').querySelector('.v').textContent = s.cost_sec!=null ? s.cost_sec+'s' : '—';
 
-  $('mRun').textContent = (s.last_run||'—').slice(5,16);
   const _st=_stateHtml(s);
+  $('mRun').textContent = (s.last_run||'—').slice(5,16);
+  // 休市/停滞状态下 mState 已含「数据截至 …」时间戳，隐藏上方「数据」行避免重复
+  const _runRow = $('mRun').closest('div');
+  if(_runRow) _runRow.style.display = /截至|停滞/.test(_st.html) ? 'none' : '';
   $('mState').innerHTML = _st.html;
   $('dot').classList.toggle('bad', _st.bad);
 
