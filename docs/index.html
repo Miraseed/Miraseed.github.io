@@ -569,6 +569,25 @@ function drawKline(){
   pcts.forEach((v,i)=>{ if(v==null) return; const x=X(i), y=VY(v);
     if(!st2){ g.moveTo(x,y); st2=true; } else g.lineTo(x,y); });
   g.stroke();
+  // 今日实时分位点：盘前/休市没有当日 K 线 bar，曲线末端停在上一交易日。
+  // 若不单独标出看板同源的实时分位，用户就会看到「曲线没破阈值、卡片说破了」。
+  // 用虚线从曲线末点连到实时点、空心圆区分于历史曲线，明确表达「延续到今日」。
+  if(p.p_now!=null && n>0){
+    const xn=X(n-1), yn=VY(p.p_now/100);
+    const yl=pcts[n-1]!=null?VY(pcts[n-1]):null;
+    if(yl!=null){
+      g.strokeStyle='rgba(230,57,70,.45)'; g.setLineDash([2,3]); g.lineWidth=1;
+      g.beginPath(); g.moveTo(xn,yl); g.lineTo(xn,yn); g.stroke(); g.setLineDash([]);
+    }
+    const hotNow = p.p_now/100 >= p.th;
+    const colNow = hotNow ? red : '#4a9eff';
+    g.beginPath(); g.arc(xn, yn, 3.6, 0, 6.284);
+    g.strokeStyle=colNow; g.lineWidth=1.6; g.stroke();
+    g.fillStyle=colNow; g.font='10px -apple-system,sans-serif'; g.textAlign='right';
+    g.fillText('实时 '+p.p_now+'%', xn-7,
+               Math.max(vy+9, Math.min(vy+volH-3, yn-7)));
+    g.textAlign='left';
+  }
   // 副图信号点
   sigs.forEach((s,i)=>{ if(!s||pcts[i]==null) return;
     g.beginPath(); g.arc(X(i), VY(pcts[i]), 2.4, 0, 6.284);
@@ -635,7 +654,9 @@ function drawKline(){
     ['区间', `${bars[0][0]} ~ ${last[0]}（${n} 根）`],
     ['信号阈值', `IV分位 ≥ ${(p.th*100).toFixed(0)}%${p.iv_th?` 且 ATM IV ≥ ${(p.iv_th*100).toFixed(0)}%`:''}`],
     ['区间信号日', `${cnt} 天`],
-    ['当前IV分位', pcts[n-1]==null?'—':`${(pcts[n-1]*100).toFixed(0)}%`],
+    ['当前IV分位', p.p_now!=null
+        ? `${p.p_now}% <span style="font-size:11px;color:var(--fg3)">今日实时${p.p_now_date?'（'+p.p_now_date.slice(5)+'，尚无当日K线）':''}</span>`
+        : (pcts[n-1]==null?'—':`${(pcts[n-1]*100).toFixed(0)}%`)],
     ['IV数据起点', p.iv_from?`${p.iv_from}（期权上市，之前无 IV 数据）`:'—'],
   ].map(([k,v])=>`<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('');
   if(KHOV < 0)
@@ -802,6 +823,7 @@ function kUnpack(p){                      // v2 紧凑格式 -> 运行时格式�
   }
   const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   return {th:p.th, iv_th:p.iv_th, iv_from:p.iv_from, live:p.live,
+          p_now:p.p_now??null, p_now_date:p.p_now_date??null,
           bars:days.map((d,i)=>[fmt(d), p.o[i], p.h[i], p.l[i], p.c[i]]),
           pct:p.p.map(v=>v<0?null:v/100),
           sig:[...p.s].map(Number)};
@@ -819,7 +841,8 @@ function kMerge(base, tail){              // tail 覆盖 base 末尾
     if(!t){ out.products[k]=b; continue; }
     const n=t.bars.length, bn=b.bars.length, cut=Math.max(0, bn-n);
     const m={...b, bars:b.bars.slice(0,cut).concat(t.bars),
-             pct:b.pct.slice(0,cut).concat(t.pct), sig:b.sig.slice(0,cut).concat(t.sig)};
+             pct:b.pct.slice(0,cut).concat(t.pct), sig:b.sig.slice(0,cut).concat(t.sig),
+             p_now:t.p_now??b.p_now??null, p_now_date:t.p_now_date??b.p_now_date??null};
     out.products[k]=m;
   }
   return out;
